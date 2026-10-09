@@ -153,6 +153,30 @@ pub enum UiRequest {
     RepoPreferences,
 }
 
+/// Build the refspecs used for pushing. Short names such as `main` become
+/// `refs/heads/main`; full refs and `HEAD` are passed through. Returns `None`
+/// for empty or option-like names, which callers report instead of silently
+/// doing nothing.
+pub fn push_refspecs(local: &str, remote_branch: &str) -> Option<(String, String)> {
+    let local = local.trim();
+    let remote_branch = remote_branch.trim();
+    let invalid = |name: &str| name.is_empty() || name.starts_with('-');
+    if invalid(local) || invalid(remote_branch) {
+        return None;
+    }
+    let local_ref = if local.starts_with("refs/") || local == "HEAD" {
+        local.to_string()
+    } else {
+        format!("refs/heads/{local}")
+    };
+    let remote_ref = if remote_branch.starts_with("refs/") {
+        remote_branch.to_string()
+    } else {
+        format!("refs/heads/{remote_branch}")
+    };
+    Some((local_ref, remote_ref))
+}
+
 /// Split an upstream like `origin/feature/x` into `("origin", "feature/x")`.
 pub fn split_upstream(upstream: &str) -> Option<(String, String)> {
     let (remote, branch) = upstream.split_once('/')?;
@@ -2871,20 +2895,11 @@ impl RepoPage {
         set_upstream: bool,
         force: crate::git::ForceMode,
     ) {
-        if !local.starts_with("refs/") && !local.starts_with("HEAD") {
+        let Some((local_ref, remote_ref)) = push_refspecs(&local, &remote_branch) else {
+            self.toast("Enter a valid local and remote branch name");
             return;
-        }
+        };
         let repo = self.repo.clone();
-        let local_ref = if local.starts_with("refs/") {
-            local.clone()
-        } else {
-            format!("refs/heads/{local}")
-        };
-        let remote_ref = if remote_branch.starts_with("refs/") {
-            remote_branch.clone()
-        } else {
-            format!("refs/heads/{remote_branch}")
-        };
         let label = format!("Pushing to {remote}…");
         let remote_for_msg = remote.clone();
         self.run_streaming(
@@ -3731,6 +3746,32 @@ mod tests {
             path_substring_pathspec("a*b").to_string_lossy(),
             ":(icase,glob)**/*a\\*b*"
         );
+    }
+
+    #[test]
+    fn push_refspecs_handles_short_and_full_names() {
+        assert_eq!(
+            push_refspecs("main", "main"),
+            Some(("refs/heads/main".into(), "refs/heads/main".into()))
+        );
+        assert_eq!(
+            push_refspecs("feature/x", "publish/x"),
+            Some((
+                "refs/heads/feature/x".into(),
+                "refs/heads/publish/x".into()
+            ))
+        );
+        assert_eq!(
+            push_refspecs("refs/heads/main", "refs/heads/main"),
+            Some(("refs/heads/main".into(), "refs/heads/main".into()))
+        );
+        assert_eq!(
+            push_refspecs("HEAD", "main"),
+            Some(("HEAD".into(), "refs/heads/main".into()))
+        );
+        assert_eq!(push_refspecs("", "main"), None);
+        assert_eq!(push_refspecs("main", ""), None);
+        assert_eq!(push_refspecs("-bad", "main"), None);
     }
 
     #[test]

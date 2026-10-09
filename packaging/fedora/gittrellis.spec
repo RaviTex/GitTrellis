@@ -3,7 +3,7 @@
 
 Name:           gittrellis
 Version:        0.2.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Native Git GUI client for Linux (alpha)
 
 License:        GPL-3.0-or-later
@@ -68,6 +68,10 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 %{_datadir}/icons/hicolor/scalable/apps/%{app_id}.svg
 
 %changelog
+* Fri Oct 09 2026 GitTrellis contributors <maintainers@example.invalid> - 0.2.0-2
+- Fix publishing a branch from the push dialog: pressing Push did nothing
+  because short branch names were rejected silently
+
 * Fri Oct 09 2026 GitTrellis contributors <maintainers@example.invalid> - 0.2.0-1
 - First alpha release of GitTrellis (formerly Stratum)
 - Unstaging works in repositories without any commits yet

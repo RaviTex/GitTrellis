@@ -1324,3 +1324,78 @@ fn unstage_works_on_unborn_branch() {
     assert_eq!(t.repo.status().unwrap().staged_count(), 0);
     assert!(t.repo.status().unwrap().untracked().len() == 2);
 }
+
+#[test]
+fn publish_branch_from_push_dialog_short_names() {
+    use gittrellis::ui::repo_page::push_refspecs;
+    let (remote_dir, url) = make_bare_remote();
+    let t = TestRepo::init();
+    t.commit_file("a.txt", "a\n", "base");
+    t.repo.add_remote("origin", &url).unwrap();
+
+    // The push dialog passes short branch names; they must be converted to
+    // refspecs instead of the push being silently skipped.
+    let (local_ref, remote_ref) = push_refspecs("main", "main").unwrap();
+    assert_eq!(local_ref, "refs/heads/main");
+    assert_eq!(remote_ref, "refs/heads/main");
+
+    t.repo
+        .push(
+            "origin",
+            &local_ref,
+            &remote_ref,
+            true,
+            ForceMode::None,
+            None,
+            no_progress,
+        )
+        .unwrap();
+
+    let branches = t.repo.branches().unwrap();
+    let main = branches.iter().find(|b| b.name == "main").unwrap();
+    assert_eq!(main.upstream.as_deref(), Some("origin/main"));
+
+    // The remote branch now exists.
+    let out = Git::system()
+        .command()
+        .cwd(remote_dir.path())
+        .args(["branch", "--list"])
+        .run_string()
+        .unwrap();
+    assert!(out.contains("main"), "remote branches: {out}");
+
+    // A second push (now with upstream) works through the quick path.
+    t.write("b.txt", "b\n");
+    t.repo.add_all().unwrap();
+    t.repo
+        .create_commit(&CommitOptions {
+            message: "second".into(),
+            ..Default::default()
+        })
+        .unwrap();
+    let (local_ref, remote_ref) = push_refspecs("main", "main").unwrap();
+    t.repo
+        .push(
+            "origin",
+            &local_ref,
+            &remote_ref,
+            false,
+            ForceMode::None,
+            None,
+            no_progress,
+        )
+        .unwrap();
+    let _ = remote_dir;
+}
+
+#[test]
+fn push_refspecs_rejects_invalid_names() {
+    use gittrellis::ui::repo_page::push_refspecs;
+    assert!(push_refspecs("", "main").is_none());
+    assert!(push_refspecs("main", "").is_none());
+    assert!(push_refspecs("-x", "main").is_none());
+    assert_eq!(
+        push_refspecs("main", "main"),
+        Some(("refs/heads/main".into(), "refs/heads/main".into()))
+    );
+}

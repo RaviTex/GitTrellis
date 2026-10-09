@@ -33,6 +33,13 @@ settings now live in `~/.config/gittrellis` and logs in
 - Cancelling the authentication prompt now reports “Authentication cancelled”
   instead of a misleading permission error.
 
+### Fixed
+
+- Publishing a branch from the push dialog now works: short branch names
+  (`main`) were rejected by an over-strict guard, so pressing Push did
+  nothing and reported nothing. Short names are converted to full refspecs,
+  and invalid names now produce a visible message.
+
 ### Fixed (changes view)
 
 - Unstaging files works in a repository without any commits yet (an unborn

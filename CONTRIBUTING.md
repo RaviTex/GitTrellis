@@ -1,4 +1,4 @@
-# Contributing to Stratum
+# Contributing to GitTrellis
 
 Thanks for considering a contribution. This document describes how the
 project is structured, the conventions we follow, and how to verify changes.
@@ -8,8 +8,8 @@ project is structured, the conventions we follow, and how to verify changes.
 ```bash
 sudo dnf install git gtk4-devel libadwaita-devel desktop-file-utils \
     libappstream-glib rust cargo
-git clone <repository-url> stratum
-cd stratum
+git clone <repository-url> gittrellis
+cd gittrellis
 cargo test
 cargo run -- /path/to/a/repository
 ```

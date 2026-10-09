@@ -250,6 +250,23 @@ pub fn list_header(title: &str) -> (gtk::Box, gtk::Label) {
     (row, count)
 }
 
+/// Make a window closable with Escape.
+pub fn close_on_escape(window: &impl IsA<gtk::Window>) {
+    let window = window.clone().upcast::<gtk::Window>();
+    let controller = gtk::EventControllerKey::new();
+    controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let win = window.clone();
+    controller.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk::gdk::Key::Escape {
+            win.close();
+            gtk::glib::Propagation::Stop
+        } else {
+            gtk::glib::Propagation::Proceed
+        }
+    });
+    window.add_controller(controller);
+}
+
 pub fn toast(overlay: &adw::ToastOverlay, message: &str) {
     let toast = adw::Toast::new(message);
     toast.set_timeout(3);

@@ -1,20 +1,20 @@
-# Flatpak manifest for Stratum.
+# Flatpak manifest for GitTrellis.
 #
 # Build:  flatpak-builder --user --install --force-clean build-dir \
-#             flatpak/io.github.stratum_git.Stratum.yml
+#             flatpak/io.github.gittrellis.GitTrellis.yml
 #
 # The Rust dependencies are downloaded at build time by flatpak-builder's
 # cargo support. For fully offline builds, generate a sources file with
 # `flatpak-cargo-generator.py` from the Flatpak project and reference it via
 # `cargo-sources.json` below.
-app-id: io.github.stratum_git.Stratum
+app-id: io.github.gittrellis.GitTrellis
 runtime: org.gnome.Platform
 runtime-version: '47'
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 
-command: stratum
+command: gittrellis
 finish-args:
   - --share=ipc
   - --socket=wayland
@@ -34,22 +34,22 @@ finish-args:
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
   env:
-    CARGO_HOME: /run/build/stratum/cargo
+    CARGO_HOME: /run/build/gittrellis/cargo
 
 modules:
-  - name: stratum
+  - name: gittrellis
     buildsystem: simple
     build-commands:
       - cargo build --release --offline
-      - install -Dpm 0755 target/release/stratum /app/bin/stratum
-      - install -Dpm 0755 target/release/stratum-askpass /app/bin/stratum-askpass
-      - install -Dpm 0644 data/io.github.stratum_git.Stratum.desktop
-        /app/share/applications/io.github.stratum_git.Stratum.desktop
-      - install -Dpm 0644 data/io.github.stratum_git.Stratum.metainfo.xml
-        /app/share/metainfo/io.github.stratum_git.Stratum.metainfo.xml
+      - install -Dpm 0755 target/release/gittrellis /app/bin/gittrellis
+      - install -Dpm 0755 target/release/gittrellis-askpass /app/bin/gittrellis-askpass
+      - install -Dpm 0644 data/io.github.gittrellis.GitTrellis.desktop
+        /app/share/applications/io.github.gittrellis.GitTrellis.desktop
+      - install -Dpm 0644 data/io.github.gittrellis.GitTrellis.metainfo.xml
+        /app/share/metainfo/io.github.gittrellis.GitTrellis.metainfo.xml
       - install -Dpm 0644
-        data/icons/hicolor/scalable/apps/io.github.stratum_git.Stratum.svg
-        /app/share/icons/hicolor/scalable/apps/io.github.stratum_git.Stratum.svg
+        data/icons/hicolor/scalable/apps/io.github.gittrellis.GitTrellis.svg
+        /app/share/icons/hicolor/scalable/apps/io.github.gittrellis.GitTrellis.svg
     sources:
       - type: dir
         path: ..

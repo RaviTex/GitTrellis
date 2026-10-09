@@ -4,20 +4,20 @@ These steps mirror the automated end-to-end test at the service layer and
 verify the actual GTK interface. Create the fixture repository first:
 
 ```bash
-./scripts/make-demo-repo.sh /tmp/stratum-demo
+./scripts/make-demo-repo.sh /tmp/gittrellis-demo
 ```
 
 Then start the application:
 
 ```bash
-cargo run -- /tmp/stratum-demo
+cargo run -- /tmp/gittrellis-demo
 ```
 
 ## 1. Open repository
 
 - [ ] The repository appears in the sidebar with its name and path.
 - [ ] The header shows the repository name and the current branch (`main`).
-- [ ] The window title is `demo — Stratum`.
+- [ ] The window title is `demo — GitTrellis`.
 
 ## 2. Changes view
 
@@ -97,7 +97,7 @@ cargo run -- /tmp/stratum-demo
 - [ ] Switching the system between dark and light mode restyles the app.
 - [ ] Opening a second repository adds a sidebar entry; switching between
       repositories preserves each one's state.
-- [ ] `stratum /path/to/repo` from a terminal opens that repository.
+- [ ] `gittrellis /path/to/repo` from a terminal opens that repository.
 
 ## 11. Authentication prompts
 

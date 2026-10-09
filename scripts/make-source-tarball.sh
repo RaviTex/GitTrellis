@@ -5,7 +5,7 @@
 set -euo pipefail
 
 version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-name="stratum-git-${version}"
+name="gittrellis-${version}"
 outdir="${1:-dist}"
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT

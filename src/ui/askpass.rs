@@ -3,7 +3,7 @@
 //! When `ssh` or `git` needs a passphrase, password or username and no
 //! terminal is available, OpenSSH and Git run the program named by
 //! `SSH_ASKPASS` / `GIT_ASKPASS` with the prompt as the first argument and
-//! read the answer from its stdout. Stratum points both variables at its own
+//! read the answer from its stdout. GitTrellis points both variables at its own
 //! helper binary; this module implements that mode and shows a native dialog.
 //!
 //! Security notes:
@@ -23,13 +23,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use gtk::prelude::*;
 
-/// Test hook: when set to `1`, the answer comes from `STRATUM_ASKPASS_ANSWER`
+/// Test hook: when set to `1`, the answer comes from `GITTRELLIS_ASKPASS_ANSWER`
 /// without showing a dialog. Used by automated tests.
-pub const ASKPASS_TEST_MODE_ENV: &str = "STRATUM_ASKPASS_TEST_MODE";
-pub const ASKPASS_ANSWER_ENV: &str = "STRATUM_ASKPASS_ANSWER";
+pub const ASKPASS_TEST_MODE_ENV: &str = "GITTRELLIS_ASKPASS_TEST_MODE";
+pub const ASKPASS_ANSWER_ENV: &str = "GITTRELLIS_ASKPASS_ANSWER";
 /// Test hook: when set (with test mode) the real dialog is driven
 /// automatically after a short delay. Value `cancel` cancels the dialog.
-pub const ASKPASS_AUTOANSWER_ENV: &str = "STRATUM_ASKPASS_AUTOANSWER";
+pub const ASKPASS_AUTOANSWER_ENV: &str = "GITTRELLIS_ASKPASS_AUTOANSWER";
 
 /// Remember the timestamp of the last cancelled prompt so the UI can explain
 /// the resulting failure as "cancelled" instead of "authentication failed".
@@ -119,7 +119,7 @@ pub fn run() -> gtk::glib::ExitCode {
     }
 
     if gtk::init().is_err() {
-        eprintln!("stratum-askpass: no display available");
+        eprintln!("gittrellis-askpass: no display available");
         return gtk::glib::ExitCode::FAILURE;
     }
 

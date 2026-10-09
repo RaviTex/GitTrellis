@@ -22,7 +22,7 @@ where
     T: Send + 'static,
 {
     std::thread::Builder::new()
-        .name(format!("stratum-task-{}", next_task_id()))
+        .name(format!("gittrellis-task-{}", next_task_id()))
         .spawn(move || {
             let result = work();
             invoke_on_main(move || on_done(result));

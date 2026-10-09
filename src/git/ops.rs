@@ -115,13 +115,16 @@ impl Repository {
     }
 
     /// Unstage the given paths.
+    ///
+    /// No explicit `HEAD` is passed: `git reset` defaults to HEAD when it
+    /// exists, and still works on an unborn branch (a fresh repository with
+    /// no commits), where `HEAD` cannot be resolved.
     pub fn reset_paths(&self, paths: &[PathBuf]) -> GitResult<()> {
         let data = Self::pathspec_stdin(paths)?;
         self.command()
             .args([
                 "reset",
                 "-q",
-                "HEAD",
                 "--pathspec-from-file=-",
                 "--pathspec-file-nul",
             ])

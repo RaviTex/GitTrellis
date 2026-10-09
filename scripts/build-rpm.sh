@@ -14,14 +14,14 @@ echo ">> creating source tarball"
 
 echo ">> preparing rpmbuild tree"
 mkdir -p "$topdir"/{SPECS,SOURCES,BUILD,RPMS,SRPMS}
-cp "dist/stratum-git-${version}.tar.gz" "$topdir/SOURCES/"
-cp packaging/fedora/stratum-git.spec "$topdir/SPECS/"
+cp "dist/gittrellis-${version}.tar.gz" "$topdir/SOURCES/"
+cp packaging/fedora/gittrellis.spec "$topdir/SPECS/"
 
 echo ">> building RPM"
 # shellcheck disable=SC2086
 rpmbuild -bb ${RPMBUILD_ARGS:-} \
     --define "_topdir $topdir" \
-    "$topdir/SPECS/stratum-git.spec"
+    "$topdir/SPECS/gittrellis.spec"
 
 echo ">> done. Packages:"
 find "$topdir/RPMS" -name '*.rpm' -print

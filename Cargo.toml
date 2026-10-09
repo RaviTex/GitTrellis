@@ -1,12 +1,12 @@
 [package]
-name = "stratum"
-version = "0.1.0"
+name = "gittrellis"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.85"
 description = "A native Git GUI client for Linux"
 license = "GPL-3.0-or-later"
-authors = ["Stratum contributors"]
-repository = "https://example.invalid/stratum"
+authors = ["GitTrellis contributors"]
+repository = "https://example.invalid/gittrellis"
 
 [dependencies]
 gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }

@@ -45,7 +45,7 @@ pub fn show(parent: &impl IsA<gtk::Window>) {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "not available".into());
     info.set_label(&format!(
-        "Stratum {} · Git {} · log file: {}",
+        "GitTrellis {} · Git {} · log file: {}",
         env!("CARGO_PKG_VERSION"),
         crate::git::Git::system()
             .version()
@@ -92,6 +92,7 @@ pub fn show(parent: &impl IsA<gtk::Window>) {
         }
     });
 
+    crate::ui::util::close_on_escape(&window);
     crate::ui::widgets_keep_alive(window.clone());
     window.present();
 }

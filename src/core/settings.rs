@@ -69,26 +69,26 @@ impl Default for Settings {
 
 impl Settings {
     pub fn config_dir() -> PathBuf {
-        if let Ok(dir) = std::env::var("STRATUM_CONFIG_DIR") {
+        if let Ok(dir) = std::env::var("GITTRELLIS_CONFIG_DIR") {
             return PathBuf::from(dir);
         }
         if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
             if !xdg.is_empty() {
-                return PathBuf::from(xdg).join("stratum");
+                return PathBuf::from(xdg).join("gittrellis");
             }
         }
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        PathBuf::from(home).join(".config").join("stratum")
+        PathBuf::from(home).join(".config").join("gittrellis")
     }
 
     pub fn state_dir() -> PathBuf {
         if let Ok(xdg) = std::env::var("XDG_STATE_HOME") {
             if !xdg.is_empty() {
-                return PathBuf::from(xdg).join("stratum");
+                return PathBuf::from(xdg).join("gittrellis");
             }
         }
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        PathBuf::from(home).join(".local").join("state").join("stratum")
+        PathBuf::from(home).join(".local").join("state").join("gittrellis")
     }
 
     pub fn config_file() -> PathBuf {

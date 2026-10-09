@@ -10,7 +10,7 @@ use gtk::glib;
 use crate::core::Settings;
 use crate::git::Repository;
 
-use super::{clone_dialog, diagnostics_dialog, repo_page::RepoPage, settings_dialog, shortcuts, util};
+use super::{clone_dialog, diagnostics_dialog, repo_page::RepoPage, settings_dialog, util};
 
 struct RepoSession {
     path: PathBuf,
@@ -34,7 +34,7 @@ impl MainWindow {
     pub fn new(app: &adw::Application, settings: Settings) -> Rc<Self> {
         let window = adw::ApplicationWindow::builder()
             .application(app)
-            .title("Stratum")
+            .title("GitTrellis")
             .default_width(settings.window_width.max(900))
             .default_height(settings.window_height.max(600))
             .width_request(720)
@@ -52,7 +52,7 @@ impl MainWindow {
         sidebar.set_size_request(272, -1);
         let sidebar_header = adw::HeaderBar::new();
         sidebar_header.set_show_title(false);
-        let sidebar_title = gtk::Label::builder().label("Stratum").build();
+        let sidebar_title = gtk::Label::builder().label("GitTrellis").build();
         sidebar_title.add_css_class("heading");
         let init_button = util::icon_button("document-new-symbolic", "Initialize a repository here");
         let open_button = util::icon_button("folder-open-symbolic", "Open repository (Ctrl+O)");
@@ -105,7 +105,7 @@ impl MainWindow {
         let welcome_icon = gtk::Image::from_icon_name("git-symbolic");
         welcome_icon.set_pixel_size(96);
         welcome_icon.add_css_class("dim-label");
-        let welcome_title = gtk::Label::builder().label("Stratum").build();
+        let welcome_title = gtk::Label::builder().label("GitTrellis").build();
         welcome_title.add_css_class("title-1");
         let welcome_sub = gtk::Label::builder()
             .label("A native Git client for Linux")
@@ -381,12 +381,12 @@ impl MainWindow {
             (
                 "settings",
                 vec!["<Control>comma"],
-                Rc::new(|w: &Rc<Self>| w.open_settings()),
+                Rc::new(|w: &Rc<Self>| w.open_settings(None)),
             ),
             (
                 "shortcuts",
                 vec!["<Control>question", "F1"],
-                Rc::new(|w: &Rc<Self>| w.show_shortcuts()),
+                Rc::new(|w: &Rc<Self>| w.open_settings(Some("shortcuts"))),
             ),
             (
                 "diagnostics",
@@ -691,7 +691,7 @@ impl MainWindow {
         self.content_stack.set_visible_child_name(&name);
         if let Some(page) = self.active_page() {
             self.window
-                .set_title(Some(&format!("{} — Stratum", page.title())));
+                .set_title(Some(&format!("{} — GitTrellis", page.title())));
             page.refresh_all();
         }
         {
@@ -780,7 +780,7 @@ impl MainWindow {
         }
         if self.sessions.borrow().is_empty() {
             self.content_stack.set_visible_child_name("welcome");
-            self.window.set_title(Some("Stratum"));
+            self.window.set_title(Some("GitTrellis"));
         } else {
             let first = self.sessions.borrow()[0].path.clone();
             self.show_repo(&first);
@@ -830,7 +830,7 @@ impl MainWindow {
         );
     }
 
-    pub fn open_settings(self: &Rc<Self>) {
+    pub fn open_settings(self: &Rc<Self>, focus_page: Option<&str>) {
         let settings = self.settings.borrow().clone();
         let weak = Rc::downgrade(self);
         let repo = self.active_page().map(|p| p.repository().clone());
@@ -838,6 +838,7 @@ impl MainWindow {
             &self.window,
             settings,
             repo,
+            focus_page,
             Rc::new(move |settings| {
                 if let Some(window) = weak.upgrade() {
                     if let Some(page) = window.active_page() {
@@ -850,21 +851,16 @@ impl MainWindow {
         );
     }
 
-    pub fn show_shortcuts(&self) {
-        let settings = self.settings.borrow().clone();
-        shortcuts::show(&self.window, &settings);
-    }
-
     pub fn show_diagnostics(&self) {
         diagnostics_dialog::show(&self.window);
     }
 
     pub fn show_about(&self) {
         let about = adw::AboutWindow::builder()
-            .application_name("Stratum")
-            .application_icon("io.github.stratum_git.Stratum")
+            .application_name("GitTrellis")
+            .application_icon("io.github.gittrellis.GitTrellis")
             .version(env!("CARGO_PKG_VERSION"))
-            .developer_name("Stratum contributors")
+            .developer_name("GitTrellis contributors")
             .license_type(gtk::License::Gpl30)
             .comments("A native Git GUI client for Linux.")
             .build();

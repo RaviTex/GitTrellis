@@ -1,13 +1,13 @@
-%global app_id io.github.stratum_git.Stratum
+%global app_id io.github.gittrellis.GitTrellis
 %global debug_package %{nil}
 
-Name:           stratum-git
-Version:        0.1.0
-Release:        4%{?dist}
-Summary:        Native Git GUI client for Linux
+Name:           gittrellis
+Version:        0.2.0
+Release:        1%{?dist}
+Summary:        Native Git GUI client for Linux (alpha)
 
 License:        GPL-3.0-or-later
-URL:            https://example.invalid/stratum
+URL:            https://example.invalid/gittrellis
 # The source tarball is produced by scripts/make-source-tarball.sh and embeds
 # the vendored Rust dependencies, so the build works without network access.
 Source0:        %{name}-%{version}.tar.gz
@@ -23,7 +23,7 @@ Requires:       gtk4%{?_isa} >= 4.12
 Requires:       libadwaita%{?_isa} >= 1.4
 
 %description
-Stratum is a native Git client for Linux built with GTK4 and libadwaita.
+GitTrellis is a native Git client for Linux built with GTK4 and libadwaita.
 It provides a changes view with hunk-level staging, a unified and
 side-by-side diff viewer, a graphical commit graph, branch, tag, stash and
 remote management, conflict resolution, and graphical clone and init
@@ -39,8 +39,8 @@ export CARGO_NET_OFFLINE=true
 cargo build --release --offline
 
 %install
-install -Dpm 0755 target/release/stratum %{buildroot}%{_bindir}/stratum
-install -Dpm 0755 target/release/stratum-askpass %{buildroot}%{_bindir}/stratum-askpass
+install -Dpm 0755 target/release/gittrellis %{buildroot}%{_bindir}/gittrellis
+install -Dpm 0755 target/release/gittrellis-askpass %{buildroot}%{_bindir}/gittrellis-askpass
 install -Dpm 0644 data/%{app_id}.desktop %{buildroot}%{_datadir}/applications/%{app_id}.desktop
 install -Dpm 0644 data/%{app_id}.metainfo.xml %{buildroot}%{_metainfodir}/%{app_id}.metainfo.xml
 install -Dpm 0644 data/icons/hicolor/scalable/apps/%{app_id}.svg \
@@ -61,14 +61,24 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 %files
 %license LICENSE
 %doc README.md CHANGELOG.md
-%{_bindir}/stratum
-%{_bindir}/stratum-askpass
+%{_bindir}/gittrellis
+%{_bindir}/gittrellis-askpass
 %{_datadir}/applications/%{app_id}.desktop
 %{_metainfodir}/%{app_id}.metainfo.xml
 %{_datadir}/icons/hicolor/scalable/apps/%{app_id}.svg
 
 %changelog
-* Fri Oct 09 2026 Stratum contributors <maintainers@example.invalid> - 0.1.0-4
+* Fri Oct 09 2026 GitTrellis contributors <maintainers@example.invalid> - 0.2.0-1
+- First alpha release of GitTrellis (formerly Stratum)
+- Unstaging works in repositories without any commits yet
+- Keyboard shortcuts are editable in Settings; the menu entry opens that page
+- Escape closes the clone, initialize, settings and diagnostics windows
+- Sidebar header with Initialize/Open/Clone icons; Recent repositories fixed
+- Direct fetch (Ctrl+F), section shortcuts Ctrl+1..6, auto-refresh
+- Native askpass dialog with optional ssh-agent loading; graceful cancel
+
+
+* Fri Oct 09 2026 GitTrellis contributors <maintainers@example.invalid> - 0.1.0-4
 - Sidebar: application name and small Initialize/Open/Clone icons in the
   header; removed the large sync button and the large Initialize button
 - Fixed the Recent repositories list
@@ -83,7 +93,7 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 - History search can match changed file names (case-insensitive substring)
 - Keyboard shortcuts are listed and editable in Settings
 
-* Wed Oct 07 2026 Stratum contributors <maintainers@example.invalid> - 0.1.0-3
+* Wed Oct 07 2026 GitTrellis contributors <maintainers@example.invalid> - 0.1.0-3
 - Fix the askpass dialog: the password field now takes focus immediately and
   Enter submits the answer; an empty submission is no longer ignored silently
 - Kill the whole git/ssh/askpass process group on cancel so progress actually
@@ -92,10 +102,10 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
   can no longer hang and the progress bar always disappears
 - Remove a spurious GTK header-bar warning from the askpass dialog
 
-* Wed Oct 07 2026 Stratum contributors <maintainers@example.invalid> - 0.1.0-2
+* Wed Oct 07 2026 GitTrellis contributors <maintainers@example.invalid> - 0.1.0-2
 - Add the native askpass helper so passphrase-protected SSH keys and HTTPS
   credentials can be entered in a GUI dialog
 - One-click pull/push plus a context-aware Sync button with ahead/behind counts
 
-* Wed Oct 07 2026 Stratum contributors <maintainers@example.invalid> - 0.1.0-1
+* Wed Oct 07 2026 GitTrellis contributors <maintainers@example.invalid> - 0.1.0-1
 - Initial release

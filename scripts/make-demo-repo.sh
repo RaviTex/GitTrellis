@@ -3,7 +3,7 @@
 # Usage: ./scripts/make-demo-repo.sh [target-dir]
 set -euo pipefail
 
-target="${1:-/tmp/stratum-demo}"
+target="${1:-/tmp/gittrellis-demo}"
 
 if [ -e "$target" ]; then
     echo "refusing to overwrite existing path: $target" >&2
@@ -17,7 +17,7 @@ git -C "$target" config user.email "ada@example.com"
 cat > "$target/README.md" << 'EOF'
 # Demo Project
 
-A sample repository for trying out Stratum.
+A sample repository for trying out GitTrellis.
 EOF
 
 cat > "$target/app.py" << 'EOF'

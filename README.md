@@ -1,6 +1,8 @@
-# Stratum — a native Git GUI client for Linux
+# GitTrellis — a native Git GUI client for Linux
 
-Stratum is a desktop Git client built with Rust, GTK4 and libadwaita. It is
+> **Status: alpha (0.2.0).** Feature-complete for everyday work; expect rough edges.
+
+GitTrellis is a desktop Git client built with Rust, GTK4 and libadwaita. It is
 designed for Fedora (and Linux desktops generally) and aims to make everyday
 Git work pleasant without hiding the details: you get a graphical commit
 graph, hunk-level staging, side-by-side diffs, conflict resolution and
@@ -107,8 +109,8 @@ sudo dnf install git gtk4-devel libadwaita-devel desktop-file-utils \
 ## Development setup
 
 ```bash
-git clone <repository-url> stratum
-cd stratum
+git clone <repository-url> gittrellis
+cd Git_Client
 cargo build            # debug build
 cargo run /path/to/repo
 ```
@@ -117,7 +119,7 @@ cargo run /path/to/repo
 
 ```bash
 cargo build --release
-./target/release/stratum
+./target/release/gittrellis
 ```
 
 ## Tests
@@ -153,19 +155,19 @@ workflow test.
 sudo dnf install rpm-build cargo rust gtk4-devel libadwaita-devel \
     desktop-file-utils libappstream-glib
 ./scripts/build-rpm.sh
-sudo dnf install dist/rpmbuild/RPMS/x86_64/stratum-git-*.rpm
+sudo dnf install dist/rpmbuild/RPMS/x86_64/gittrellis-*.rpm
 ```
 
-Stratum then appears in the application menu under *Development* and can open
-a repository passed as an argument: `stratum ~/Projects/my-repo`.
+GitTrellis then appears in the application menu under *Development* and can open
+a repository passed as an argument: `gittrellis ~/Projects/my-repo`.
 
 ### Flatpak
 
 ```bash
 flatpak install flathub org.gnome.Sdk//47 org.freedesktop.Sdk.Extension.rust-stable//47
 flatpak-builder --user --install --force-clean build-dir \
-    flatpak/io.github.stratum_git.Stratum.yml
-flatpak run io.github.stratum_git.Stratum
+    flatpak/io.github.gittrellis.GitTrellis.yml
+flatpak run io.github.gittrellis.GitTrellis
 ```
 
 For fully offline Flatpak builds, generate `flatpak/cargo-sources.json` with
@@ -174,16 +176,16 @@ sources.
 
 ## Packaging notes
 
-- The RPM spec is at `packaging/fedora/stratum-git.spec`.
+- The RPM spec is at `packaging/fedora/gittrellis.spec`.
 - `scripts/make-source-tarball.sh` vendors all Rust dependencies so distro
   builds need no network access.
 - Desktop entry, AppStream metadata and the scalable icon live in `data/`.
-- Configuration is stored in `$XDG_CONFIG_HOME/stratum/settings.json`; logs in
-  `$XDG_STATE_HOME/stratum/logs/`.
+- Configuration is stored in `$XDG_CONFIG_HOME/gittrellis/settings.json`; logs in
+  `$XDG_STATE_HOME/gittrellis/logs/`.
 
-## How Stratum handles credentials
+## How GitTrellis handles credentials
 
-Stratum never implements its own credential storage. Fetch, pull and push run
+GitTrellis never implements its own credential storage. Fetch, pull and push run
 through the system `git` binary, so:
 
 - SSH keys and `ssh-agent` work as configured in `~/.ssh/config`;
@@ -191,8 +193,8 @@ through the system `git` binary, so:
 - commit and tag signing use your `user.signingkey` / `gpg.format`;
 - `known_hosts` verification is unchanged.
 
-Because a GUI has no terminal, Stratum ships a small **askpass helper**
-(`/usr/bin/stratum-askpass`). It is wired into `GIT_ASKPASS` and
+Because a GUI has no terminal, GitTrellis ships a small **askpass helper**
+(`/usr/bin/gittrellis-askpass`). It is wired into `GIT_ASKPASS` and
 `SSH_ASKPASS` (with `SSH_ASKPASS_REQUIRE=force`) so that:
 
 - a key passphrase prompts a native dialog once — click **Continue** and the

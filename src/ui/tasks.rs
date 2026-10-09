@@ -19,7 +19,7 @@ where
 {
     let (tx, rx) = async_channel::bounded::<T>(1);
     std::thread::Builder::new()
-        .name("stratum-task".into())
+        .name("gittrellis-task".into())
         .spawn(move || {
             let result = work();
             let _ = tx.send_blocking(result);
@@ -73,7 +73,7 @@ where
     let cancel_worker = cancel.clone();
     let result_slot_worker = Arc::clone(&result_slot);
     std::thread::Builder::new()
-        .name("stratum-stream".into())
+        .name("gittrellis-stream".into())
         .spawn(move || {
             let progress = move |_: StreamKind, line: &str| {
                 let _ = line_tx.send_blocking(line.to_string());

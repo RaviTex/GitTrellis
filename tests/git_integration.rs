@@ -8,7 +8,7 @@ mod common;
 use std::path::PathBuf;
 
 use common::TestRepo;
-use stratum::git::{
+use gittrellis::git::{
     patch, ChangeKind, CommitOptions, ConfigScope, ConflictChoice, ForceMode, Git, LineKind,
     LogOptions, MergeOutcome, Repository, ResetMode, StreamKind,
 };
@@ -36,7 +36,7 @@ fn open_and_status_clean() {
 fn open_non_repo_fails_with_helpful_error() {
     let dir = tempfile::tempdir().unwrap();
     let err = Repository::open(dir.path()).unwrap_err();
-    assert!(matches!(err, stratum::git::GitError::NotARepository { .. }));
+    assert!(matches!(err, gittrellis::git::GitError::NotARepository { .. }));
     assert!(err.user_message().contains("not a Git repository"));
 }
 
@@ -481,7 +481,7 @@ fn merge_creates_merge_commit() {
     assert_eq!(outcome, MergeOutcome::Merged);
     let head = t.repo.log_commit("HEAD").unwrap();
     assert!(head.is_merge());
-    assert_eq!(head.refs.iter().filter(|r| r.kind == stratum::git::RefKind::Head).count(), 1);
+    assert_eq!(head.refs.iter().filter(|r| r.kind == gittrellis::git::RefKind::Head).count(), 1);
 }
 
 #[test]
@@ -525,13 +525,13 @@ fn merge_conflict_detect_resolve_continue() {
     assert!(status.has_conflicts());
     assert_eq!(status.conflicted().len(), 1);
     let op = t.repo.operation_state();
-    assert!(matches!(op, stratum::git::OperationState::Merge { .. }));
+    assert!(matches!(op, gittrellis::git::OperationState::Merge { .. }));
     assert_eq!(t.repo.conflicted_paths().unwrap().len(), 1);
 
     // The worktree must contain conflict markers
     let content = t.read("f.txt");
     assert!(content.contains("<<<<<<<"));
-    let regions = stratum::git::parse_conflict_regions(&content);
+    let regions = gittrellis::git::parse_conflict_regions(&content);
     assert_eq!(regions.len(), 1);
 
     // Resolve by hand and continue
@@ -610,7 +610,7 @@ fn rebase_success_and_conflict_abort() {
     if let Ok(MergeOutcome::Conflicts(_)) = outcome {
         assert!(matches!(
             t.repo.operation_state(),
-            stratum::git::OperationState::Rebase { .. }
+            gittrellis::git::OperationState::Rebase { .. }
         ));
         t.repo.rebase_abort().unwrap();
         assert!(t.repo.operation_state().is_none());
@@ -631,7 +631,7 @@ fn rebase_conflict_full_cycle() {
     assert!(matches!(outcome, MergeOutcome::Conflicts(_)));
     assert!(matches!(
         t.repo.operation_state(),
-        stratum::git::OperationState::Rebase { .. }
+        gittrellis::git::OperationState::Rebase { .. }
     ));
     // resolve and continue
     t.write("f.txt", "resolved\n");
@@ -670,7 +670,7 @@ fn cherry_pick_conflict_and_state() {
     assert!(matches!(outcome, MergeOutcome::Conflicts(_)));
     assert!(matches!(
         t.repo.operation_state(),
-        stratum::git::OperationState::CherryPick { .. }
+        gittrellis::git::OperationState::CherryPick { .. }
     ));
     t.repo.cherry_pick_abort().unwrap();
     assert!(t.repo.operation_state().is_none());
@@ -948,13 +948,13 @@ fn clone_progress_and_error() {
 fn fetch_can_be_cancelled() {
     let t = TestRepo::init();
     t.commit_file("a.txt", "a", "base");
-    let cancel = stratum::git::Cancellation::new();
+    let cancel = gittrellis::git::Cancellation::new();
     cancel.cancel();
     let err = t
         .repo
         .fetch(Some("origin"), false, false, Some(cancel), no_progress)
         .unwrap_err();
-    assert!(matches!(err, stratum::git::GitError::Cancelled));
+    assert!(matches!(err, gittrellis::git::GitError::Cancelled));
 }
 
 // ---------------------------------------------------------------------------
@@ -1141,9 +1141,9 @@ fn full_workflow_simulation() {
 
     // 9. Resolve using the conflict parser and the "both" strategy
     let content = t.read("README.md");
-    let regions = stratum::git::parse_conflict_regions(&content);
+    let regions = gittrellis::git::parse_conflict_regions(&content);
     assert!(!regions.is_empty());
-    let resolved = stratum::git::resolve_conflicts(&content, &regions, &|_| {
+    let resolved = gittrellis::git::resolve_conflicts(&content, &regions, &|_| {
         ConflictChoice::Both
     });
     assert!(!resolved.contains("<<<<<<<"));
@@ -1166,11 +1166,11 @@ fn full_workflow_simulation() {
 
 #[test]
 fn askpass_helper_answers_and_rejects() {
-    let helper = env!("CARGO_BIN_EXE_stratum-askpass");
+    let helper = env!("CARGO_BIN_EXE_gittrellis-askpass");
     let answered = std::process::Command::new(helper)
         .arg("Enter passphrase for key '/tmp/id_ed25519':")
-        .env("STRATUM_ASKPASS_TEST_MODE", "1")
-        .env("STRATUM_ASKPASS_ANSWER", "s3cret")
+        .env("GITTRELLIS_ASKPASS_TEST_MODE", "1")
+        .env("GITTRELLIS_ASKPASS_ANSWER", "s3cret")
         .output()
         .unwrap();
     assert!(answered.status.success());
@@ -1180,8 +1180,8 @@ fn askpass_helper_answers_and_rejects() {
     // so that ssh/git abort cleanly instead of hanging.
     let cancelled = std::process::Command::new(helper)
         .arg("Password:")
-        .env("STRATUM_ASKPASS_TEST_MODE", "1")
-        .env_remove("STRATUM_ASKPASS_ANSWER")
+        .env("GITTRELLIS_ASKPASS_TEST_MODE", "1")
+        .env_remove("GITTRELLIS_ASKPASS_ANSWER")
         .output()
         .unwrap();
     assert!(!cancelled.status.success());
@@ -1195,11 +1195,11 @@ fn askpass_dialog_answers_and_cancels() {
         eprintln!("skipping askpass dialog test: no display");
         return;
     }
-    let helper = env!("CARGO_BIN_EXE_stratum-askpass");
+    let helper = env!("CARGO_BIN_EXE_gittrellis-askpass");
     let answered = std::process::Command::new(helper)
         .arg("Enter passphrase for key '/tmp/id_ed25519':")
-        .env("STRATUM_ASKPASS_TEST_MODE", "1")
-        .env("STRATUM_ASKPASS_AUTOANSWER", "typed-passphrase")
+        .env("GITTRELLIS_ASKPASS_TEST_MODE", "1")
+        .env("GITTRELLIS_ASKPASS_AUTOANSWER", "typed-passphrase")
         .output()
         .unwrap();
     assert!(answered.status.success());
@@ -1210,8 +1210,8 @@ fn askpass_dialog_answers_and_cancels() {
 
     let cancelled = std::process::Command::new(helper)
         .arg("Password:")
-        .env("STRATUM_ASKPASS_TEST_MODE", "1")
-        .env("STRATUM_ASKPASS_AUTOANSWER", "cancel")
+        .env("GITTRELLIS_ASKPASS_TEST_MODE", "1")
+        .env("GITTRELLIS_ASKPASS_AUTOANSWER", "cancel")
         .output()
         .unwrap();
     assert!(!cancelled.status.success());
@@ -1220,7 +1220,7 @@ fn askpass_dialog_answers_and_cancels() {
 
 #[test]
 fn cancel_terminates_lingering_askpass_helpers() {
-    use stratum::git::{Cancellation, GitError};
+    use gittrellis::git::{Cancellation, GitError};
     use std::os::unix::fs::PermissionsExt;
 
     let tmp = tempfile::tempdir().unwrap();
@@ -1260,7 +1260,7 @@ fn cancel_terminates_lingering_askpass_helpers() {
 
 #[test]
 fn history_search_by_changed_file_name() {
-    use stratum::ui::repo_page::path_substring_pathspec;
+    use gittrellis::ui::repo_page::path_substring_pathspec;
     let t = TestRepo::init();
     t.commit_file("src/widgets/button.rs", "a", "button work");
     t.commit_file("src/main.rs", "b", "main work");
@@ -1297,7 +1297,30 @@ fn askpass_cancel_marker_is_recognised() {
     let t = TestRepo::init();
     let _ = t;
     // The marker lives in the isolated XDG state directory used by the tests.
-    assert!(!stratum::ui::askpass::cancelled_recently());
-    stratum::ui::askpass::mark_cancelled();
-    assert!(stratum::ui::askpass::cancelled_recently());
+    assert!(!gittrellis::ui::askpass::cancelled_recently());
+    gittrellis::ui::askpass::mark_cancelled();
+    assert!(gittrellis::ui::askpass::cancelled_recently());
+}
+
+#[test]
+fn unstage_works_on_unborn_branch() {
+    // A fresh repository has no commits; HEAD cannot be resolved, so
+    // unstaging must not pass an explicit HEAD to git reset.
+    let t = TestRepo::init();
+    t.write("a.txt", "a");
+    t.write("b.txt", "b");
+    t.repo.add_all().unwrap();
+    assert_eq!(t.repo.status().unwrap().staged_count(), 2);
+
+    t.repo.reset_paths(&paths(&["a.txt"])).unwrap();
+    let status = t.repo.status().unwrap();
+    assert_eq!(status.staged_count(), 1);
+    assert!(status
+        .untracked()
+        .iter()
+        .any(|e| e.path.to_string_lossy() == "a.txt"));
+
+    t.repo.reset_all().unwrap();
+    assert_eq!(t.repo.status().unwrap().staged_count(), 0);
+    assert!(t.repo.status().unwrap().untracked().len() == 2);
 }

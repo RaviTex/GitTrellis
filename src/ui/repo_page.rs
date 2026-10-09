@@ -3388,6 +3388,7 @@ impl RepoPage {
             &window,
             settings,
             Some(self.repo.clone()),
+            None,
             Rc::new(move |settings| {
                 if let Some(page) = weak.upgrade() {
                     page.apply_settings(settings);
@@ -3560,7 +3561,12 @@ impl RepoPage {
     /// stashes, remotes, conflicts).
     pub fn show_section(self: &Rc<Self>, name: &str) {
         if self.view_stack.child_by_name(name).is_some() {
+            let already_there = self.view_stack.visible_child_name().as_deref() == Some(name);
             self.view_stack.set_visible_child_name(name);
+            // Pressing the Changes shortcut again focuses the commit message.
+            if name == "changes" && already_there {
+                self.changes.commit_panel().focus_message();
+            }
         }
         if name == "changes" {
             self.refresh_status_views();
@@ -3686,7 +3692,7 @@ fn repo_menu_popover(
     );
     add("Keyboard Shortcuts", None, Some("shortcuts"));
     add("Diagnostics", None, Some("diagnostics"));
-    add("About Stratum", None, Some("about"));
+    add("About GitTrellis", None, Some("about"));
     popover.set_child(Some(&box_));
     popover
 }

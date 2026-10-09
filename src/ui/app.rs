@@ -11,7 +11,7 @@ use crate::core::{logging, Settings, Settings as AppSettings};
 use crate::log_info;
 use crate::ui::window::MainWindow;
 
-pub const APP_ID: &str = "io.github.stratum_git.Stratum";
+pub const APP_ID: &str = "io.github.gittrellis.GitTrellis";
 
 thread_local! {
     static MAIN_WINDOW: RefCell<Option<Rc<MainWindow>>> = const { RefCell::new(None) };
@@ -22,14 +22,14 @@ pub fn run() -> glib::ExitCode {
     let settings = Settings::load();
     logging::init(level_from(&settings.log_level));
     log_info!(
-        "Stratum {} starting (config: {})",
+        "GitTrellis {} starting (config: {})",
         env!("CARGO_PKG_VERSION"),
         Settings::config_file().display()
     );
 
     // A distinct application id can be requested for development builds so
     // they can run alongside an installed copy.
-    let app_id = std::env::var("STRATUM_APP_ID").unwrap_or_else(|_| APP_ID.to_string());
+    let app_id = std::env::var("GITTRELLIS_APP_ID").unwrap_or_else(|_| APP_ID.to_string());
     let app = adw::Application::builder()
         .application_id(&app_id)
         .flags(gio::ApplicationFlags::HANDLES_OPEN)

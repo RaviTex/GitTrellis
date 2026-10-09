@@ -1,6 +1,6 @@
 # Architecture
 
-Stratum is deliberately layered so that Git logic never leaks into the UI and
+GitTrellis is deliberately layered so that Git logic never leaks into the UI and
 the UI is never driven by parsing raw command output.
 
 ```
@@ -27,7 +27,7 @@ the UI is never driven by parsing raw command output.
 
 `libgit2`/`git2` would avoid a subprocess per operation, but it re-implements
 authentication, credential helpers, signing, hooks and edge cases that users
-already depend on. Stratum shells out to the system `git` because:
+already depend on. GitTrellis shells out to the system `git` because:
 
 - SSH agent, credential helpers, GPG/SSH signing and `known_hosts` work
   exactly as they do on the command line — no parallel credential system;

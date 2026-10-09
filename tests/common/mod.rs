@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::sync::Once;
 
-use stratum::git::{ConfigScope, Repository};
+use gittrellis::git::{ConfigScope, Repository};
 
 static ISOLATE: Once = Once::new();
 
@@ -21,7 +21,7 @@ pub fn isolate() {
         std::env::set_var("GIT_TERMINAL_PROMPT", "0");
         std::env::set_var("GIT_AUTHOR_DATE", "1704067200 +0000");
         std::env::set_var("GIT_COMMITTER_DATE", "1704067200 +0000");
-        let home = std::env::temp_dir().join("stratum-test-home");
+        let home = std::env::temp_dir().join("gittrellis-test-home");
         let _ = std::fs::create_dir_all(home.join(".config"));
         let _ = std::fs::create_dir_all(home.join(".state"));
         std::env::set_var("HOME", &home);

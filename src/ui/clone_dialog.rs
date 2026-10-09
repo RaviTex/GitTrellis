@@ -10,6 +10,7 @@ use crate::core::Settings;
 use crate::git::{GitError, Repository};
 
 use super::tasks;
+use super::util;
 
 pub fn show(parent: &impl IsA<gtk::Window>, settings: Settings, on_cloned: Rc<dyn Fn(PathBuf)>) {
     let window = adw::Window::builder()
@@ -273,6 +274,7 @@ pub fn show(parent: &impl IsA<gtk::Window>, settings: Settings, on_cloned: Rc<dy
         });
     }
 
+    util::close_on_escape(&window);
     crate::ui::widgets_keep_alive(window.clone());
     window.present();
 }
@@ -375,6 +377,7 @@ pub fn show_init(parent: &impl IsA<gtk::Window>, on_initialized: Rc<dyn Fn(PathB
         });
     }
 
+    util::close_on_escape(&window);
     crate::ui::widgets_keep_alive(window.clone());
     window.present();
 }

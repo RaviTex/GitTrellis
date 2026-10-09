@@ -62,7 +62,7 @@ impl GitError {
                     None => String::new(),
                 };
                 format!(
-                    "Authentication failed{where_}.\n\nIf your SSH key has a passphrase, Stratum shows a prompt for it.\
+                    "Authentication failed{where_}.\n\nIf your SSH key has a passphrase, GitTrellis shows a prompt for it.\
 Check that the key is available (for example with `ssh-add -l`), that it is added to your GitHub/GitLab account, \
 and that your credential helper is configured for HTTPS remotes."
                 )
@@ -139,7 +139,7 @@ and that your credential helper is configured for HTTPS remotes."
     /// Suggested recovery action for the UI, when known.
     pub fn recovery_action(&self) -> Option<String> {
         match self {
-            GitError::GitNotFound => Some("Install the git package and restart Stratum.".into()),
+            GitError::GitNotFound => Some("Install the git package and restart GitTrellis.".into()),
             GitError::NotARepository { .. } => {
                 Some("Open another directory or initialize a new repository here.".into())
             }

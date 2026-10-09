@@ -5,7 +5,11 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.0] - 2026-10-09 (alpha)
+
+First alpha release. The application is renamed from Stratum to GitTrellis;
+settings now live in `~/.config/gittrellis` and logs in
+`~/.local/state/gittrellis`.
 
 ### Added
 
@@ -29,15 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Cancelling the authentication prompt now reports “Authentication cancelled”
   instead of a misleading permission error.
 
-### Fixed
+### Fixed (changes view)
 
+- Unstaging files works in a repository without any commits yet (an unborn
+  `HEAD` made `git reset HEAD` fail).
 - The Recent repositories list was never populated.
 - Clicking an already selected change now deselects it and clears the diff;
   multi-selection is preserved across automatic refreshes.
 - Fetching or pushing no longer risks a stuck progress bar when an askpass
   process lingers (see the process-group fixes above).
 
-### Fixed (auth)
+### Fixed
 
 - The askpass dialog now focuses the password field immediately, submits on
   Enter and no longer ignores an empty answer silently — this is why entering
@@ -108,4 +114,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Fedora RPM spec, vendoring script and Flatpak manifest, desktop entry,
   AppStream metadata and application icon.
 
-[0.1.0]: https://example.invalid/stratum/releases/tag/v0.1.0
+[0.2.0]: https://example.invalid/gittrellis/releases/tag/v0.2.0
+[0.1.0]: https://example.invalid/gittrellis/releases/tag/v0.1.0

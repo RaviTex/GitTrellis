@@ -75,7 +75,7 @@ impl Cancellation {
 /// test harness), in which case askpass variables are left untouched so that
 /// tests never accidentally re-execute the test binary.
 fn askpass_helper_path() -> Option<std::path::PathBuf> {
-    if let Ok(custom) = std::env::var("STRATUM_ASKPASS_HELPER") {
+    if let Ok(custom) = std::env::var("GITTRELLIS_ASKPASS_HELPER") {
         let path = std::path::PathBuf::from(custom);
         if path.is_file() {
             return Some(path);
@@ -83,7 +83,7 @@ fn askpass_helper_path() -> Option<std::path::PathBuf> {
     }
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    let candidate = dir.join("stratum-askpass");
+    let candidate = dir.join("gittrellis-askpass");
     if candidate.is_file() {
         return Some(candidate);
     }
@@ -660,9 +660,9 @@ mod tests {
     #[test]
     fn askpass_is_configured_when_helper_exists() {
         let dir = tempfile::tempdir().unwrap();
-        let helper = dir.path().join("stratum-askpass");
+        let helper = dir.path().join("gittrellis-askpass");
         std::fs::write(&helper, "#!/bin/sh\nexit 0\n").unwrap();
-        std::env::set_var("STRATUM_ASKPASS_HELPER", &helper);
+        std::env::set_var("GITTRELLIS_ASKPASS_HELPER", &helper);
         let git = Git::system();
         let envs: std::collections::HashMap<_, _> = git
             .base_env
@@ -672,7 +672,7 @@ mod tests {
         assert_eq!(envs.get("GIT_ASKPASS").map(String::as_str), Some(helper.to_string_lossy().as_ref()));
         assert_eq!(envs.get("SSH_ASKPASS").map(String::as_str), Some(helper.to_string_lossy().as_ref()));
         assert_eq!(envs.get("SSH_ASKPASS_REQUIRE").map(String::as_str), Some("force"));
-        std::env::remove_var("STRATUM_ASKPASS_HELPER");
+        std::env::remove_var("GITTRELLIS_ASKPASS_HELPER");
     }
 
     #[test]

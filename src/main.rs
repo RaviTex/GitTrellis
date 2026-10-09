@@ -1,5 +1,5 @@
-//! Stratum — a native Git GUI client for Linux.
+//! GitTrellis — a native Git GUI client for Linux.
 
 fn main() -> gtk::glib::ExitCode {
-    stratum::ui::app::run()
+    gittrellis::ui::app::run()
 }

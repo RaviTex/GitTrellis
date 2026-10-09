@@ -358,6 +358,7 @@ pub fn build_settings_page(
         .title("Shortcuts")
         .icon_name("preferences-desktop-keyboard-shortcuts-symbolic")
         .build();
+    page.set_name(Some("shortcuts"));
 
     let mut groups: Vec<(String, adw::PreferencesGroup)> = Vec::new();
     for def in DEFS {
@@ -439,61 +440,6 @@ pub fn build_settings_page(
     }
     page.add(&reset_group);
     page
-}
-
-/// The F1 reference dialog, showing the effective (possibly customised)
-/// accelerators.
-pub fn show(parent: &impl IsA<gtk::Window>, settings: &Settings) {
-    let window = adw::Window::builder()
-        .title("Keyboard Shortcuts")
-        .default_width(500)
-        .default_height(620)
-        .transient_for(parent)
-        .build();
-    let toolbar_view = adw::ToolbarView::new();
-    let header = adw::HeaderBar::new();
-    toolbar_view.add_top_bar(&header);
-
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    content.set_margin_start(16);
-    content.set_margin_end(16);
-    content.set_margin_top(16);
-    content.set_margin_bottom(16);
-
-    let mut last_section = "";
-    for def in DEFS {
-        if def.section != last_section {
-            let section = gtk::Label::builder()
-                .label(def.section)
-                .xalign(0.0)
-                .margin_top(12)
-                .build();
-            section.add_css_class("heading");
-            content.append(&section);
-            last_section = def.section;
-        }
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        let label = gtk::Label::builder()
-            .label(def.label)
-            .xalign(0.0)
-            .hexpand(true)
-            .build();
-        let value = gtk::Label::new(Some(&effective_display(settings, def)));
-        value.add_css_class("dim-label");
-        value.add_css_class("monospace");
-        row.append(&label);
-        row.append(&value);
-        content.append(&row);
-    }
-    let scroll = gtk::ScrolledWindow::builder()
-        .child(&content)
-        .vexpand(true)
-        .build();
-    toolbar_view.set_content(Some(&scroll));
-    window.set_content(Some(&toolbar_view));
-
-    crate::ui::widgets_keep_alive(window.clone());
-    window.present();
 }
 
 #[cfg(test)]

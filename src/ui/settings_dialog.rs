@@ -14,8 +14,9 @@ pub fn show(
     parent: &impl IsA<gtk::Window>,
     settings: Settings,
     repo: Option<Repository>,
+    focus_page: Option<&str>,
     on_saved: Rc<dyn Fn(Settings)>,
-) {
+) -> adw::PreferencesWindow {
     let window = adw::PreferencesWindow::builder()
         .title("Settings")
         .transient_for(parent)
@@ -39,6 +40,7 @@ pub fn show(
         .title("Application")
         .icon_name("preferences-system-symbolic")
         .build();
+    app_page.set_name(Some("application"));
 
     let appearance = adw::PreferencesGroup::builder().title("Appearance").build();
     let diff_modes = gtk::StringList::new(&["Unified", "Side by side"]);
@@ -204,6 +206,7 @@ pub fn show(
     let shortcuts_page =
         super::shortcuts::build_settings_page(Rc::clone(&saved), Rc::clone(&apply_rc));
     window.add(&shortcuts_page);
+    let focus_page = focus_page.map(str::to_string);
 
     // ---------------- Git configuration page ----------------
     if let Some(repo) = repo {
@@ -211,6 +214,7 @@ pub fn show(
             .title("Git")
             .icon_name("git-symbolic")
             .build();
+        git_page.set_name(Some("git"));
 
         let scope_group = adw::PreferencesGroup::builder()
             .title("Configuration scope")
@@ -374,8 +378,49 @@ pub fn show(
         window.add(&git_page);
     }
 
+    super::util::close_on_escape(&window);
     crate::ui::widgets_keep_alive(window.clone());
     window.present();
+    // Selecting the page must happen after the window is presented.
+    if let Some(page) = focus_page {
+        window.set_visible_page_name(&page);
+    }
+    window
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_window_focuses_requested_page() {
+        // Needs a display; skip silently on headless machines.
+        if gtk::init().is_err() {
+            eprintln!("skipping settings window test: no display");
+            return;
+        }
+        let parent = gtk::Window::new();
+        let settings = Settings::default();
+        let window = show(
+            &parent,
+            settings,
+            None,
+            Some("shortcuts"),
+            Rc::new(|_| {}),
+        );
+        let context = gtk::glib::MainContext::default();
+        for _ in 0..20 {
+            while context.pending() {
+                context.iteration(false);
+            }
+        }
+        assert_eq!(
+            window.visible_page_name().as_deref(),
+            Some("shortcuts"),
+            "settings should open on the Shortcuts page"
+        );
+        window.close();
+    }
 }
 
 fn level_from(name: &str) -> crate::core::logging::Level {

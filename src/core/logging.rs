@@ -66,7 +66,7 @@ pub fn init(level: Level) {
     let file = std::fs::create_dir_all(&log_dir)
         .ok()
         .and_then(|_| {
-            let name = format!("stratum-{}.log", chrono::Local::now().format("%Y-%m-%d"));
+            let name = format!("gittrellis-{}.log", chrono::Local::now().format("%Y-%m-%d"));
             let path = log_dir.join(name);
             std::fs::OpenOptions::new()
                 .create(true)

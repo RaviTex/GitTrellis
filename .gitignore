@@ -1,0 +1,19 @@
+# Rust build output
+/target
+
+# Packaging output
+/dist
+/build-dir
+/flatpak/build-dir
+*.rpm
+
+# Editor and OS noise
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Local environment overrides
+.env
+.cargo/config.toml.local

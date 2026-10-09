@@ -1,0 +1,57 @@
+# Flatpak manifest for Stratum.
+#
+# Build:  flatpak-builder --user --install --force-clean build-dir \
+#             flatpak/io.github.stratum_git.Stratum.yml
+#
+# The Rust dependencies are downloaded at build time by flatpak-builder's
+# cargo support. For fully offline builds, generate a sources file with
+# `flatpak-cargo-generator.py` from the Flatpak project and reference it via
+# `cargo-sources.json` below.
+app-id: io.github.stratum_git.Stratum
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+
+command: stratum
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=network
+  # Git repositories live in the user's home directory
+  - --filesystem=home
+  # SSH agent and known hosts for authentication
+  - --filesystem=~/.ssh:ro
+  - --socket=ssh-auth
+  # GPG signing
+  - --filesystem=~/.gnupg:ro
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.gnome.keyring
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/stratum/cargo
+
+modules:
+  - name: stratum
+    buildsystem: simple
+    build-commands:
+      - cargo build --release --offline
+      - install -Dpm 0755 target/release/stratum /app/bin/stratum
+      - install -Dpm 0755 target/release/stratum-askpass /app/bin/stratum-askpass
+      - install -Dpm 0644 data/io.github.stratum_git.Stratum.desktop
+        /app/share/applications/io.github.stratum_git.Stratum.desktop
+      - install -Dpm 0644 data/io.github.stratum_git.Stratum.metainfo.xml
+        /app/share/metainfo/io.github.stratum_git.Stratum.metainfo.xml
+      - install -Dpm 0644
+        data/icons/hicolor/scalable/apps/io.github.stratum_git.Stratum.svg
+        /app/share/icons/hicolor/scalable/apps/io.github.stratum_git.Stratum.svg
+    sources:
+      - type: dir
+        path: ..
+      # Uncomment after generating dependency sources:
+      # - cargo-sources.json

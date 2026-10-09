@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.stratum_git.Stratum</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Stratum</name>
+  <summary>Native Git GUI client</summary>
+  <description>
+    <p>
+      Stratum is a native Git client for Linux. It lets you review working tree
+      changes, stage and unstage files or individual hunks, inspect diffs side
+      by side, browse the commit graph, manage branches, tags, stashes and
+      remotes, resolve merge conflicts, and fetch, pull and push — without
+      leaving the desktop.
+    </p>
+    <p>
+      Stratum uses your existing Git configuration: SSH agent, credential
+      helpers, commit signing and known hosts all work as they do on the
+      command line. Nothing is re-implemented and no credentials are stored by
+      the application itself.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.stratum_git.Stratum.desktop</launchable>
+  <provides>
+    <binary>stratum</binary>
+    <mediatype>inode/directory</mediatype>
+  </provides>
+  <url type="homepage">https://example.invalid/stratum</url>
+  <url type="bugtracker">https://example.invalid/stratum/issues</url>
+  <developer id="io.github.stratum_git">
+    <name>Stratum contributors</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-07">
+      <description>
+        <p>First release: changes view with hunk staging, diff viewer, commit
+        graph, branches, remotes, tags, stashes, conflict resolution, clone,
+        init and settings.</p>
+      </description>
+    </release>
+  </releases>
+</component>

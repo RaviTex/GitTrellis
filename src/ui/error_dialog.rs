@@ -112,4 +112,3 @@ pub fn info(parent: &impl IsA<gtk::Window>, heading: &str, body: &str) {
     dialog.set_close_response("close");
     dialog.present();
 }
-

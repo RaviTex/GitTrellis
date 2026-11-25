@@ -101,8 +101,8 @@ Unix and only lossily converted for display.
 
 - Destructive operations (discard, delete untracked, hard reset, branch/tag
   deletion, stash drop, force push, aborting an operation) require an explicit
-  confirmation; the most dangerous ones require ticking “I understand this
-  cannot be undone”.
+  confirmation with a destructive button and a clear explanation of what will
+  be lost. A single confirmation step avoids re-entering a closing dialog.
 - `Repository::resolve_in_workdir` refuses absolute paths and `..` escapes
   before any file is written or deleted.
 - Ref and remote names are validated before use.

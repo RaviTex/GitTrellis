@@ -25,8 +25,16 @@ cargo run -- /tmp/gittrellis-demo
       **Untracked Files**.
 - [ ] Click `README.md`: the diff is shown with added lines highlighted and
       line numbers.
+- [ ] Click `notes.txt` and then `README.md` again: only the last clicked file
+      stays highlighted and its diff is shown.
+- [ ] Ctrl-click a second file: both files stay selected.
+- [ ] Right-click a change row: the same actions menu opens with a short
+      description under each entry.
 - [ ] Click the `+` button on the `README.md` row: the file moves to
       **Staged Changes** and the commit button becomes sensitive.
+- [ ] Discard a change and delete an untracked file: each confirmation has
+      only Cancel and the destructive action, and the window does not freeze
+      after confirming.
 - [ ] Stage `notes.txt` as well.
 - [ ] Right-click style menu (⋮) → **Open File** opens the file in the default
       editor; **Open Containing Folder** opens the file manager.
@@ -53,6 +61,8 @@ cargo run -- /tmp/gittrellis-demo
 - [ ] Switch to **History**: commits are listed newest first with the graph
       lanes, ref badges and relative times.
 - [ ] Click a commit: details, changed files and the file diff appear.
+- [ ] Right-click a commit: the same actions menu as the three-dot button
+      opens, with descriptions, and the clicked commit becomes selected.
 - [ ] Copy SHA copies the full hash.
 - [ ] **Create branch here…** creates and switches to a branch.
 - [ ] **Cherry-pick** on a commit from another branch adds it to the current
@@ -63,6 +73,9 @@ cargo run -- /tmp/gittrellis-demo
 
 - [ ] **New Branch** creates and switches.
 - [ ] Double-click another branch checks it out.
+- [ ] Drag one local branch onto another: a dialog offers **Merge into** or
+      **Rebase onto**; both update the graph and switch to Conflicts when
+      needed.
 - [ ] **Merge** and **Rebase** ask for confirmation and update the graph.
 - [ ] Deleting an unmerged branch asks for explicit confirmation.
 
@@ -91,6 +104,9 @@ cargo run -- /tmp/gittrellis-demo
 
 ## 10. Keyboard, theme and windowing
 
+- [ ] The terminal button opens a shell in the repository root; ``Ctrl+` ``
+      does the same. Opening Git output collapses the terminal and vice versa.
+- [ ] Typing `pwd` in the terminal prints the repository path.
 - [ ] Ctrl+S stages the selected file, Ctrl+Shift+S stages everything,
       Ctrl+R refreshes, Ctrl+P opens push, Ctrl+F searches, F1 shows the
       shortcut reference.

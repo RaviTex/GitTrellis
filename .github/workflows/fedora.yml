@@ -1,0 +1,120 @@
+name: Fedora CI and alpha release
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Test and package on Fedora 45
+    runs-on: ubuntu-latest
+    container:
+      image: registry.fedoraproject.org/fedora:45
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Install Fedora build dependencies
+        run: |
+          dnf -y install git gcc cargo rust rpm-build redhat-rpm-config \
+            pkgconf-pkg-config gtk4-devel libadwaita-devel vte291-gtk4-devel \
+            desktop-file-utils libappstream-glib python3 findutils gzip tar
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - run: cargo test --locked
+
+      - name: Check for a release version
+        if: github.event_name == 'push'
+        id: version
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: python3 scripts/release-info.py "$BEFORE"
+
+      - name: Build and verify release assets
+        if: steps.version.outputs.version != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ./scripts/build-rpm.sh
+          shopt -s nullglob
+          rpms=(dist/rpmbuild/RPMS/x86_64/gittrellis-"$VERSION"-*.fc45.x86_64.rpm)
+          if [[ ${#rpms[@]} -ne 1 ]]; then
+            echo "Expected exactly one Fedora 45 x86_64 RPM for GitTrellis $VERSION" >&2
+            exit 1
+          fi
+          cp "${rpms[0]}" "dist/gittrellis-$VERSION.tar.gz" dist/release/
+          cd dist/release
+          sha256sum -- *.rpm *.tar.gz > SHA256SUMS
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: steps.version.outputs.version != ''
+        with:
+          name: gittrellis-${{ steps.version.outputs.version }}
+          path: dist/release/
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub alpha
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: gittrellis-release-${{ needs.test.outputs.version }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gittrellis-${{ needs.test.outputs.version }}
+
+      - name: Upload assets and publish
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.test.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          release="$(gh api --paginate "repos/$GH_REPO/releases" \
+            --jq ".[] | select(.tag_name == \"$tag\")")"
+
+          if [[ -n "$release" ]] && jq -e '.draft == false' <<< "$release" > /dev/null; then
+            echo "$tag is already published."
+            exit 0
+          fi
+
+          sha256sum --check SHA256SUMS
+          remote_tags="$(git ls-remote --tags "$GITHUB_SERVER_URL/$GH_REPO.git" \
+            "refs/tags/$tag" "refs/tags/$tag^{}")"
+          tagged_commit="$(awk 'END { print $1 }' <<< "$remote_tags")"
+          if [[ -n "$tagged_commit" && "$tagged_commit" != "$GITHUB_SHA" ]]; then
+            echo "$tag already points to a different commit" >&2
+            exit 1
+          fi
+
+          if [[ -z "$release" ]]; then
+            gh release create "$tag" --draft --prerelease --target "$GITHUB_SHA" \
+              --title "GitTrellis $VERSION alpha" --notes-file notes.md
+          elif ! jq -e --arg sha "$GITHUB_SHA" \
+            '.draft and .prerelease and .target_commitish == $sha' <<< "$release" > /dev/null; then
+            echo "$tag has a draft belonging to a different release target" >&2
+            exit 1
+          fi
+
+          gh release upload "$tag" --clobber -- *.rpm *.tar.gz SHA256SUMS
+          gh release edit "$tag" --draft=false

@@ -98,6 +98,27 @@ pub fn install_css() {
             border-radius: 10px;
             padding: 2px 4px;
         }
+        .menu-item {
+            padding: 6px 8px;
+            border-radius: 8px;
+        }
+        .menu-item-title {
+            font-weight: 600;
+        }
+        .menu-item-description {
+            font-size: 0.85em;
+        }
+        .drop-hover {
+            background-color: alpha(@accent_bg_color, 0.22);
+            border-radius: 8px;
+        }
+        .terminal-panel {
+            background-color: @window_bg_color;
+            border-top: 1px solid alpha(@window_fg_color, 0.12);
+        }
+        .terminal {
+            padding: 4px;
+        }
         "#,
     );
     if let Some(display) = gtk::gdk::Display::default() {

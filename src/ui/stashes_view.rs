@@ -193,9 +193,21 @@ fn stash_popover(stash: &StashEntry, sender: Sender) -> gtk::Popover {
         box_.append(&button);
     };
     add("View Changes", UiRequest::ShowStash(stash.index), false);
-    add("Apply (keep stash)", UiRequest::ApplyStash(stash.index), false);
-    add("Apply and Restore Index", UiRequest::ApplyStashIndex(stash.index), false);
-    add("Pop (apply and drop)", UiRequest::PopStash(stash.index), false);
+    add(
+        "Apply (keep stash)",
+        UiRequest::ApplyStash(stash.index),
+        false,
+    );
+    add(
+        "Apply and Restore Index",
+        UiRequest::ApplyStashIndex(stash.index),
+        false,
+    );
+    add(
+        "Pop (apply and drop)",
+        UiRequest::PopStash(stash.index),
+        false,
+    );
     add(
         "Create Branch from Stash…",
         UiRequest::BranchFromStash(stash.index),

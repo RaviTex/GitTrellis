@@ -401,13 +401,7 @@ mod tests {
         }
         let parent = gtk::Window::new();
         let settings = Settings::default();
-        let window = show(
-            &parent,
-            settings,
-            None,
-            Some("shortcuts"),
-            Rc::new(|_| {}),
-        );
+        let window = show(&parent, settings, None, Some("shortcuts"), Rc::new(|_| {}));
         let context = gtk::glib::MainContext::default();
         for _ in 0..20 {
             while context.pending() {

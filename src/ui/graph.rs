@@ -102,9 +102,7 @@ pub fn layout_commits(commits: &[Commit]) -> GraphLayout {
                 segments.push(Segment::LowerVertical { lane: parent_lane });
             } else {
                 if !above.contains(&parent_lane) {
-                    segments.push(Segment::LowerVertical {
-                        lane: parent_lane,
-                    });
+                    segments.push(Segment::LowerVertical { lane: parent_lane });
                 }
                 segments.push(Segment::Curve {
                     from_lane: lane,
@@ -181,11 +179,7 @@ mod tests {
 
     #[test]
     fn linear_history_uses_one_lane() {
-        let commits = vec![
-            commit("c", &["b"]),
-            commit("b", &["a"]),
-            commit("a", &[]),
-        ];
+        let commits = vec![commit("c", &["b"]), commit("b", &["a"]), commit("a", &[])];
         let layout = layout_commits(&commits);
         assert_eq!(layout.max_lane, 0);
         assert!(layout.rows.iter().all(|r| r.lane == 0));
@@ -219,10 +213,7 @@ mod tests {
 
     #[test]
     fn unrelated_roots_get_separate_lanes() {
-        let commits = vec![
-            commit("x", &[]),
-            commit("y", &[]),
-        ];
+        let commits = vec![commit("x", &[]), commit("y", &[])];
         let layout = layout_commits(&commits);
         assert_eq!(layout.rows[0].lane, 0);
         // Second root reuses lane 0 since it is free again.
@@ -241,18 +232,7 @@ mod tests {
             ("a", ""),
         ] {
             let fields = [
-                id,
-                id,
-                parents,
-                "A",
-                "a@a",
-                "0",
-                "A",
-                "a@a",
-                "0",
-                "s",
-                "",
-                "",
+                id, id, parents, "A", "a@a", "0", "A", "a@a", "0", "s", "", "",
             ];
             data.extend_from_slice(fields.join("\u{1f}").as_bytes());
             data.push(0);

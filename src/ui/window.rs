@@ -54,9 +54,11 @@ impl MainWindow {
         sidebar_header.set_show_title(false);
         let sidebar_title = gtk::Label::builder().label("GitTrellis").build();
         sidebar_title.add_css_class("heading");
-        let init_button = util::icon_button("document-new-symbolic", "Initialize a repository here");
+        let init_button =
+            util::icon_button("document-new-symbolic", "Initialize a repository here");
         let open_button = util::icon_button("folder-open-symbolic", "Open repository (Ctrl+O)");
-        let clone_button = util::icon_button("cloud-download-symbolic", "Clone repository (Ctrl+Shift+O)");
+        let clone_button =
+            util::icon_button("cloud-download-symbolic", "Clone repository (Ctrl+Shift+O)");
         // Order: application name, then small action icons.
         sidebar_header.pack_start(&sidebar_title);
         sidebar_header.pack_start(&init_button);
@@ -301,11 +303,7 @@ impl MainWindow {
                 vec!["<Control><Shift>o"],
                 Rc::new(|w: &Rc<Self>| w.clone_dialog()),
             ),
-            (
-                "init",
-                vec![],
-                Rc::new(|w: &Rc<Self>| w.init_dialog()),
-            ),
+            ("init", vec![], Rc::new(|w: &Rc<Self>| w.init_dialog())),
             (
                 "refresh",
                 vec!["<Control>r"],
@@ -393,11 +391,7 @@ impl MainWindow {
                 vec![],
                 Rc::new(|w: &Rc<Self>| w.show_diagnostics()),
             ),
-            (
-                "about",
-                vec![],
-                Rc::new(|w: &Rc<Self>| w.show_about()),
-            ),
+            ("about", vec![], Rc::new(|w: &Rc<Self>| w.show_about())),
             (
                 "section-changes",
                 vec!["<Control>1"],
@@ -457,6 +451,15 @@ impl MainWindow {
                 vec!["F9"],
                 Rc::new(|w: &Rc<Self>| {
                     w.split.set_show_sidebar(!w.split.shows_sidebar());
+                }),
+            ),
+            (
+                "toggle-terminal",
+                vec!["<Control>grave"],
+                Rc::new(|w: &Rc<Self>| {
+                    if let Some(page) = w.active_page() {
+                        page.toggle_terminal();
+                    }
                 }),
             ),
             (

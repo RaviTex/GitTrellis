@@ -1,6 +1,8 @@
 # GitTrellis — a native Git GUI client for Linux
 
-> **Status: alpha (0.2.0).** Feature-complete for everyday work; expect rough edges.
+> **Alpha.** The Fedora 45 x86_64 package is available from [GitHub Releases](https://github.com/RaviTex/GitTrellis/releases).
+
+[Project website](https://gittrellis.vercel.app) · [Report an issue](https://github.com/RaviTex/GitTrellis/issues)
 
 GitTrellis is a desktop Git client built with Rust, GTK4 and libadwaita. It is
 designed for Fedora (and Linux desktops generally) and aims to make everyday
@@ -28,7 +30,8 @@ exactly where your terminal left them — in Git itself.
   diffs, and actions: copy SHA/message, create branch/tag, cherry-pick,
   revert, reset, checkout, compare with working tree.
 - **Branches** — create, checkout, rename, delete (with safety confirmation),
-  merge, rebase, set upstream, push, and compare branches.
+  merge, rebase, set upstream, push, and compare branches. Drag one local
+  branch onto another to merge or rebase it.
 - **Remotes** — add, edit, rename, remove, fetch (with optional prune), pull
   (merge / rebase / fast-forward-only), push (including safe force-with-lease
   and confirmed force), delete remote branches and push/delete tags.
@@ -63,6 +66,8 @@ exactly where your terminal left them — in Git itself.
 - **Git output console** — every operation's raw output is available at the
   bottom of the window, and a diagnostics log with copyable details is
   available from the menu.
+- **Embedded terminal** — open a real shell in the repository root from the
+  header bar or with ``Ctrl+` ``.
 - **Native integration** — Wayland and X11, system file dialogs, dark/light
   themes via libadwaita, high-DPI support, XDG config/state directories, and
   a full, editable keyboard shortcut set.
@@ -83,6 +88,7 @@ Default shortcuts (all editable in Settings):
 | `Ctrl+,` | Settings |
 | `Ctrl+?` or `F1` | Shortcut reference |
 | `F9` | Toggle sidebar |
+| ``Ctrl+` `` | Toggle terminal |
 
 ## Architecture in one paragraph
 
@@ -96,21 +102,22 @@ blocks. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
 ## Requirements
 
-- Fedora 39+ (or any distribution with the libraries below)
-- Rust 1.85+ and Cargo (for development builds)
+- Fedora 45 x86_64 for the prebuilt RPM. Source builds require the libraries below.
+- Rust 1.92+ and Cargo (for development builds)
 - GTK 4.12+ and libadwaita 1.4+ (runtime and development packages)
+- VTE 2.91 for GTK4 (runtime `vte291-gtk4`, development `vte291-gtk4-devel`)
 - Git 2.23+ (tested against 2.56)
 
 ```bash
-sudo dnf install git gtk4-devel libadwaita-devel desktop-file-utils \
-    libappstream-glib rust cargo
+sudo dnf install git gtk4-devel libadwaita-devel vte291-gtk4-devel \
+    desktop-file-utils libappstream-glib rust cargo
 ```
 
 ## Development setup
 
 ```bash
-git clone <repository-url> gittrellis
-cd Git_Client
+git clone https://github.com/RaviTex/GitTrellis.git
+cd GitTrellis
 cargo build            # debug build
 cargo run /path/to/repo
 ```
@@ -151,9 +158,19 @@ workflow test.
 
 ### From RPM (recommended)
 
+Download the Fedora 45 x86_64 RPM and the `SHA256SUMS` file from
+[GitHub Releases](https://github.com/RaviTex/GitTrellis/releases). From the download directory, run:
+
+```bash
+sha256sum --check --ignore-missing SHA256SUMS
+sudo dnf install ./gittrellis-*.fc45.x86_64.rpm
+```
+
+To build the RPM locally:
+
 ```bash
 sudo dnf install rpm-build cargo rust gtk4-devel libadwaita-devel \
-    desktop-file-utils libappstream-glib
+    vte291-gtk4-devel desktop-file-utils libappstream-glib
 ./scripts/build-rpm.sh
 sudo dnf install dist/rpmbuild/RPMS/x86_64/gittrellis-*.rpm
 ```

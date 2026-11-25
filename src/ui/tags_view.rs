@@ -211,10 +211,22 @@ fn tag_popover(tag: &Tag, sender: Sender) -> gtk::Popover {
         });
         box_.append(&button);
     };
-    add("Checkout (detached)", UiRequest::CheckoutTag(tag.name.clone()), false);
-    add("Show in History", UiRequest::ShowTagInHistory(tag.name.clone()), false);
+    add(
+        "Checkout (detached)",
+        UiRequest::CheckoutTag(tag.name.clone()),
+        false,
+    );
+    add(
+        "Show in History",
+        UiRequest::ShowTagInHistory(tag.name.clone()),
+        false,
+    );
     add("Push Tag…", UiRequest::PushTag(tag.name.clone()), false);
-    add("Copy Tag Name", UiRequest::CopyText(tag.name.clone()), false);
+    add(
+        "Copy Tag Name",
+        UiRequest::CopyText(tag.name.clone()),
+        false,
+    );
     add("Delete Tag…", UiRequest::DeleteTag(tag.name.clone()), true);
     add(
         "Delete Remote Tag…",

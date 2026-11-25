@@ -33,8 +33,12 @@ pub fn confirm<F>(
     dialog.present();
 }
 
-/// A destructive confirmation that additionally requires the user to tick a
-/// checkbox. Used for operations that can lose data.
+/// A destructive confirmation with an explanation of what will be lost.
+///
+/// The dialog intentionally has no acknowledgement checkbox: pressing the
+/// destructive action is the confirmation. Keeping a single response path
+/// also avoids re-presenting a dialog from inside its own response handler,
+/// which could leave GTK with a stuck modal grab.
 pub fn confirm_dangerous<F>(
     parent: &impl IsA<gtk::Window>,
     heading: &str,
@@ -54,14 +58,7 @@ pub fn confirm_dangerous<F>(
         .wrap(true)
         .build();
     explain.add_css_class("dim-label");
-    let check = gtk::CheckButton::builder()
-        .label("I understand this cannot be undone")
-        .margin_top(6)
-        .build();
-    let extra = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    extra.append(&explain);
-    extra.append(&check);
-    dialog.set_extra_child(Some(&extra));
+    dialog.set_extra_child(Some(&explain));
 
     dialog.add_response("cancel", "Cancel");
     dialog.add_response("ok", ok_label);
@@ -69,28 +66,22 @@ pub fn confirm_dangerous<F>(
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");
     let on_confirm = std::rc::Rc::new(on_confirm);
-    let dialog_weak = dialog.downgrade();
-    let check_for_response = check.clone();
     dialog.connect_response(None, move |_, response| {
-        if response != "ok" {
-            return;
+        if response == "ok" {
+            on_confirm();
         }
-        if !check_for_response.is_active() {
-            // Require the acknowledgement before proceeding.
-            check_for_response.add_css_class("error");
-            if let Some(dialog) = dialog_weak.upgrade() {
-                dialog.present();
-            }
-            return;
-        }
-        on_confirm();
     });
     dialog.present();
 }
 
 /// Simple text prompt dialog.
-pub fn prompt<F>(parent: &impl IsA<gtk::Window>, heading: &str, placeholder: &str, ok_label: &str, on_ok: F)
-where
+pub fn prompt<F>(
+    parent: &impl IsA<gtk::Window>,
+    heading: &str,
+    placeholder: &str,
+    ok_label: &str,
+    on_ok: F,
+) where
     F: Fn(String) + 'static,
 {
     let dialog = adw::MessageDialog::new(Some(parent), Some(heading), None);

@@ -88,15 +88,17 @@ impl HistoryView {
         toolbar.append(&compare_button);
         toolbar.append(&refresh_button);
 
-        let sender_holder: Rc<RefCell<Option<Rc<dyn Fn(UiRequest)>>>> =
-            Rc::new(RefCell::new(None));
+        let sender_holder: Rc<RefCell<Option<Rc<dyn Fn(UiRequest)>>>> = Rc::new(RefCell::new(None));
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let selection = gtk::SingleSelection::new(Some(store.clone()));
         selection.set_autoselect(false);
         selection.set_can_unselect(true);
         let list_view = gtk::ListView::builder()
             .model(&selection)
-            .factory(&history_factory(Rc::clone(&sender_holder)))
+            .factory(&history_factory(
+                Rc::clone(&sender_holder),
+                selection.clone(),
+            ))
             .show_separators(false)
             .build();
         list_view.add_css_class("history-list");
@@ -207,10 +209,7 @@ impl HistoryView {
         let revert = util::icon_button("edit-undo-symbolic", "Revert this commit");
         let reset = util::icon_button("edit-redo-symbolic", "Reset current branch to here…");
         let checkout = util::icon_button("go-next-symbolic", "Checkout this commit (detached)");
-        let compare = util::icon_button(
-            "git-compare-symbolic",
-            "Compare with working tree",
-        );
+        let compare = util::icon_button("git-compare-symbolic", "Compare with working tree");
         actions.append(&copy_sha);
         actions.append(&copy_message);
         actions.append(&create_branch);
@@ -306,7 +305,9 @@ impl HistoryView {
                 let w = weak.clone();
                 selection.connect_selection_changed(move |sel, _, _| {
                     let Some(v) = w.upgrade() else { return };
-                    let Some(item) = sel.selected_item() else { return };
+                    let Some(item) = sel.selected_item() else {
+                        return;
+                    };
                     let Ok(boxed) = item.downcast::<glib::BoxedAnyObject>() else {
                         return;
                     };
@@ -513,11 +514,12 @@ impl HistoryView {
         let layout = graph::layout_commits(commits);
         let max = max_lane.max(layout.max_lane);
         for (commit, row) in commits.iter().zip(layout.rows.iter()) {
-            self.store.append(&glib::BoxedAnyObject::new(HistoryItemData {
-                commit: commit.clone(),
-                row: row.clone(),
-                max_lane: max,
-            }));
+            self.store
+                .append(&glib::BoxedAnyObject::new(HistoryItemData {
+                    commit: commit.clone(),
+                    row: row.clone(),
+                    max_lane: max,
+                }));
         }
         *self.has_more.borrow_mut() = has_more;
         self.load_more.set_visible(has_more);
@@ -533,11 +535,12 @@ impl HistoryView {
         let layout = graph::layout_commits(commits);
         let max = max_lane.max(layout.max_lane);
         for (commit, row) in commits.iter().zip(layout.rows.iter()) {
-            self.store.append(&glib::BoxedAnyObject::new(HistoryItemData {
-                commit: commit.clone(),
-                row: row.clone(),
-                max_lane: max,
-            }));
+            self.store
+                .append(&glib::BoxedAnyObject::new(HistoryItemData {
+                    commit: commit.clone(),
+                    row: row.clone(),
+                    max_lane: max,
+                }));
         }
         *self.has_more.borrow_mut() = has_more;
         self.load_more.set_visible(has_more);
@@ -566,12 +569,7 @@ impl HistoryView {
     }
 
     /// Show commit details and its diffs.
-    pub fn show_commit(
-        &self,
-        commit: &Commit,
-        files: Vec<ChangedFile>,
-        diffs: Vec<FileDiff>,
-    ) {
+    pub fn show_commit(&self, commit: &Commit, files: Vec<ChangedFile>, diffs: Vec<FileDiff>) {
         *self.current_commit.borrow_mut() = Some(commit.clone());
         *self.current_files.borrow_mut() = files.clone();
         *self.current_diffs.borrow_mut() = diffs.clone();
@@ -616,8 +614,7 @@ impl HistoryView {
             badge.add_css_class(class);
             self.detail_refs.append(&badge);
         }
-        self.detail_refs
-            .set_visible(!commit.refs.is_empty());
+        self.detail_refs.set_visible(!commit.refs.is_empty());
 
         while let Some(child) = self.detail_files.first_child() {
             self.detail_files.remove(&child);
@@ -649,7 +646,8 @@ impl HistoryView {
         if let Some(first) = diffs.first() {
             self.diff_view.show_file(first);
             self.diff_view.set_allow_actions(false);
-            self.detail_files.select_row(self.detail_files.row_at_index(0).as_ref());
+            self.detail_files
+                .select_row(self.detail_files.row_at_index(0).as_ref());
         }
         self.detail_stack.set_visible_child_name("details");
     }
@@ -704,8 +702,10 @@ impl HistoryView {
 
 fn history_factory(
     sender_holder: Rc<RefCell<Option<Rc<dyn Fn(UiRequest)>>>>,
+    selection: gtk::SingleSelection,
 ) -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
+    let setup_holder = Rc::clone(&sender_holder);
     factory.connect_setup(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
@@ -753,6 +753,42 @@ fn history_factory(
         menu.set_visible(false);
         row.append(&menu);
         item.set_child(Some(&row));
+
+        // Right click opens the same commit actions menu as the three-dot
+        // button. Bindings are looked up at click time because list rows are
+        // recycled while scrolling.
+        {
+            let row_weak = row.downgrade();
+            let list_item_weak = item.downgrade();
+            let selection = selection.clone();
+            let holder = Rc::clone(&setup_holder);
+            let gesture = gtk::GestureClick::new();
+            gesture.set_button(3);
+            gesture.connect_pressed(move |_, _, x, y| {
+                let Some(row) = row_weak.upgrade() else {
+                    return;
+                };
+                let Some(list_item) = list_item_weak.upgrade() else {
+                    return;
+                };
+                let Some(item) = list_item.item() else {
+                    return;
+                };
+                let Ok(boxed) = item.downcast::<glib::BoxedAnyObject>() else {
+                    return;
+                };
+                let commit = boxed.borrow::<HistoryItemData>().commit.clone();
+                drop(boxed);
+                let position = list_item.position();
+                if position != gtk::INVALID_LIST_POSITION {
+                    selection.set_selected(position);
+                }
+                let sender = holder.borrow().clone();
+                let popover = commit_context_popover(&commit, sender);
+                util::show_context_menu(&row, &popover, x, y);
+            });
+            row.add_controller(gesture);
+        }
     });
     let holder_for_bind = Rc::clone(&sender_holder);
     factory.connect_bind(move |_, item| {
@@ -773,10 +809,7 @@ fn history_factory(
         drop(data);
 
         // Commit actions menu
-        if let Some(menu) = row
-            .last_child()
-            .and_downcast::<gtk::MenuButton>()
-        {
+        if let Some(menu) = row.last_child().and_downcast::<gtk::MenuButton>() {
             menu.set_visible(true);
             let sender = holder_for_bind.borrow().clone();
             menu.set_popover(Some(&commit_context_popover(&commit, sender)));
@@ -810,23 +843,38 @@ fn history_factory(
                 tb.push(c.clone());
                 it = c.next_sibling();
             }
-            if let Some(summary) = tb.first().and_then(|c| c.clone().downcast::<gtk::Label>().ok()) {
+            if let Some(summary) = tb
+                .first()
+                .and_then(|c| c.clone().downcast::<gtk::Label>().ok())
+            {
                 summary.set_label(&commit.summary);
             }
-            if let Some(meta) = tb.get(1).and_then(|c| c.clone().downcast::<gtk::Box>().ok()) {
+            if let Some(meta) = tb
+                .get(1)
+                .and_then(|c| c.clone().downcast::<gtk::Box>().ok())
+            {
                 let mut m = Vec::new();
                 let mut it = meta.first_child();
                 while let Some(c) = it {
                     m.push(c.clone());
                     it = c.next_sibling();
                 }
-                if let Some(sha) = m.first().and_then(|c| c.clone().downcast::<gtk::Label>().ok()) {
+                if let Some(sha) = m
+                    .first()
+                    .and_then(|c| c.clone().downcast::<gtk::Label>().ok())
+                {
                     sha.set_label(&commit.short_id);
                 }
-                if let Some(author) = m.get(1).and_then(|c| c.clone().downcast::<gtk::Label>().ok()) {
+                if let Some(author) = m
+                    .get(1)
+                    .and_then(|c| c.clone().downcast::<gtk::Label>().ok())
+                {
                     author.set_label(&format!("· {}", commit.author_name));
                 }
-                if let Some(time) = m.get(2).and_then(|c| c.clone().downcast::<gtk::Label>().ok()) {
+                if let Some(time) = m
+                    .get(2)
+                    .and_then(|c| c.clone().downcast::<gtk::Label>().ok())
+                {
                     time.set_label(&format!("· {}", util::relative_time(commit.commit_time)));
                 }
                 if let Some(refs) = m.get(3).and_then(|c| c.clone().downcast::<gtk::Box>().ok()) {
@@ -893,7 +941,13 @@ fn draw_graph_row(
     }
     // Commit dot
     set_lane_color(cr, color);
-    cr.arc(graph::lane_x(lane), mid, DOT_RADIUS, 0.0, std::f64::consts::TAU);
+    cr.arc(
+        graph::lane_x(lane),
+        mid,
+        DOT_RADIUS,
+        0.0,
+        std::f64::consts::TAU,
+    );
     let _ = cr.fill();
 }
 
@@ -930,37 +984,79 @@ fn meta_label() -> gtk::Label {
 fn commit_context_popover(commit: &Commit, sender: Option<Rc<dyn Fn(UiRequest)>>) -> gtk::Popover {
     let popover = gtk::Popover::new();
     let box_ = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    box_.set_width_request(310);
     box_.set_margin_start(6);
     box_.set_margin_end(6);
     box_.set_margin_top(6);
     box_.set_margin_bottom(6);
-    let add = |label: &str, req: UiRequest| {
-        let button = gtk::Button::builder()
-            .label(label)
-            .has_frame(false)
-            .halign(gtk::Align::Fill)
-            .build();
+    let add = |title: &str, description: &str, icon: &str, req: UiRequest| {
+        let button = util::menu_item(icon, title, description);
         let sender = sender.clone();
         let pop = popover.clone();
         button.connect_clicked(move |_| {
+            pop.popdown();
             if let Some(s) = sender.as_ref() {
                 s(req.clone());
             }
-            pop.popdown();
         });
         box_.append(&button);
     };
     let sha = commit.id.clone();
-    add("Copy SHA", UiRequest::CopyText(sha.clone()));
-    add("Copy message", UiRequest::CopyText(commit.body.clone()));
-    add("Create branch here…", UiRequest::CreateBranchAt(sha.clone()));
-    add("Create tag here…", UiRequest::CreateTagAt(sha.clone()));
-    add("Checkout (detached)", UiRequest::CheckoutDetached(sha.clone()));
-    add("Cherry-pick", UiRequest::CherryPick(sha.clone()));
-    add("Revert", UiRequest::Revert(sha.clone()));
-    add("Reset current branch to here…", UiRequest::ResetTo(sha.clone()));
     add(
-        "Compare with working tree",
+        "Copy SHA",
+        "Copy the full commit hash",
+        "edit-copy-symbolic",
+        UiRequest::CopyText(sha.clone()),
+    );
+    add(
+        "Copy Message",
+        "Copy the complete commit message",
+        "edit-copy-symbolic",
+        UiRequest::CopyText(commit.body.clone()),
+    );
+    box_.append(&util::separator());
+    add(
+        "Create Branch Here…",
+        "Create and switch to a branch at this commit",
+        "git-branch-symbolic",
+        UiRequest::CreateBranchAt(sha.clone()),
+    );
+    add(
+        "Create Tag Here…",
+        "Tag this commit",
+        "tag-symbolic",
+        UiRequest::CreateTagAt(sha.clone()),
+    );
+    add(
+        "Checkout (Detached)",
+        "Check out this commit without a branch",
+        "go-next-symbolic",
+        UiRequest::CheckoutDetached(sha.clone()),
+    );
+    box_.append(&util::separator());
+    add(
+        "Cherry-pick",
+        "Apply this commit on top of the current branch",
+        "document-send-symbolic",
+        UiRequest::CherryPick(sha.clone()),
+    );
+    add(
+        "Revert",
+        "Create a new commit that undoes this one",
+        "edit-undo-symbolic",
+        UiRequest::Revert(sha.clone()),
+    );
+    add(
+        "Reset Current Branch to Here…",
+        "Move the current branch to this commit",
+        "edit-redo-symbolic",
+        UiRequest::ResetTo(sha.clone()),
+    );
+    box_.append(&util::separator());
+    add(
+        "Compare with Working Tree",
+        "Show how the working tree differs from this commit",
+        "git-compare-symbolic",
         UiRequest::CompareWithWorktree(sha.clone()),
     );
     popover.set_child(Some(&box_));

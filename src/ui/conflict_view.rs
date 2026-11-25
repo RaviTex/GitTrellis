@@ -98,7 +98,8 @@ impl ConflictView {
         let accept_all_theirs = gtk::Button::with_label("All Incoming");
         let mark_resolved = gtk::Button::with_label("Mark Resolved");
         mark_resolved.add_css_class("suggested-action");
-        let open_editor = util::icon_button("document-open-symbolic", "Open file in external editor");
+        let open_editor =
+            util::icon_button("document-open-symbolic", "Open file in external editor");
         toolbar.append(&path_label);
         toolbar.append(&accept_all_ours);
         toolbar.append(&accept_all_theirs);
@@ -269,7 +270,12 @@ impl ConflictView {
             "{} — resolve all conflicts, then continue. Aborting restores the previous state.",
             util::operation_label(operation)
         ));
-        let can_skip = matches!(operation, OperationState::Rebase { .. } | OperationState::CherryPick { .. } | OperationState::Revert { .. });
+        let can_skip = matches!(
+            operation,
+            OperationState::Rebase { .. }
+                | OperationState::CherryPick { .. }
+                | OperationState::Revert { .. }
+        );
         self.skip_button.set_visible(can_skip);
     }
 
@@ -298,7 +304,8 @@ impl ConflictView {
         } else {
             self.toolbar.set_sensitive(true);
             if self.file_list.row_at_index(0).is_some() {
-                self.file_list.select_row(self.file_list.row_at_index(0).as_ref());
+                self.file_list
+                    .select_row(self.file_list.row_at_index(0).as_ref());
             }
         }
     }
@@ -351,8 +358,13 @@ impl ConflictView {
         }
 
         for (index, region) in regions.iter().enumerate() {
-            self.regions_box
-                .append(&region_widget(path, index, region, regions.len(), self.request.borrow().clone()));
+            self.regions_box.append(&region_widget(
+                path,
+                index,
+                region,
+                regions.len(),
+                self.request.borrow().clone(),
+            ));
         }
     }
 

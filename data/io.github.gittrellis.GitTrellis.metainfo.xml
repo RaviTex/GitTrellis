@@ -25,13 +25,20 @@
     <binary>gittrellis</binary>
     <mediatype>inode/directory</mediatype>
   </provides>
-  <url type="homepage">https://example.invalid/gittrellis</url>
-  <url type="bugtracker">https://example.invalid/gittrellis/issues</url>
+  <url type="homepage">https://gittrellis.vercel.app</url>
+  <url type="bugtracker">https://github.com/RaviTex/GitTrellis/issues</url>
   <developer id="io.github.gittrellis">
     <name>GitTrellis contributors</name>
   </developer>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.3.0" date="2026-11-25" type="development">
+      <description>
+        <p>Adds drag-and-drop branch integration, context menus for file changes
+        and commits, and an embedded terminal. Fixes file selection and
+        destructive-action confirmation.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-09" type="development">
       <description>
         <p>First alpha release of GitTrellis (formerly Stratum). Adds editable

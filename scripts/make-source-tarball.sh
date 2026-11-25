@@ -11,7 +11,7 @@ workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
 
 echo ">> vendoring dependencies for ${name}"
-cargo vendor --quiet "${workdir}/vendor" > "${workdir}/vendor-config.toml"
+cargo vendor --locked --quiet "${workdir}/vendor" > "${workdir}/vendor-config.toml"
 
 echo ">> assembling source tree"
 mkdir -p "${workdir}/${name}"

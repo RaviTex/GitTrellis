@@ -56,10 +56,7 @@ impl StreamingOp {
 pub fn run_streaming<T, F, P, D>(work: F, on_line: P, on_done: D) -> StreamingOp
 where
     T: Send + 'static,
-    F: FnOnce(
-            Cancellation,
-            Box<dyn FnMut(StreamKind, &str) + Send>,
-        ) -> GitResult<T>
+    F: FnOnce(Cancellation, Box<dyn FnMut(StreamKind, &str) + Send>) -> GitResult<T>
         + Send
         + 'static,
     P: Fn(String) + 'static,
@@ -78,10 +75,13 @@ where
             let progress = move |_: StreamKind, line: &str| {
                 let _ = line_tx.send_blocking(line.to_string());
             };
-            let result = work(cancel_worker, Box::new(move |kind, line| {
-                let _ = kind;
-                progress(StreamKind::Stderr, line);
-            }));
+            let result = work(
+                cancel_worker,
+                Box::new(move |kind, line| {
+                    let _ = kind;
+                    progress(StreamKind::Stderr, line);
+                }),
+            );
             *result_slot_worker.lock().unwrap() = Some(result);
         })
         .expect("spawn worker");

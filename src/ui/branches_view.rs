@@ -4,6 +4,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
+use gtk::glib;
+use gtk::glib::value::ToValue;
 
 use crate::git::Branch;
 
@@ -258,7 +260,64 @@ fn build_branch_row(branch: &Branch, sender: &Sender) -> gtk::ListBoxRow {
     widget.append(&tracking);
     widget.append(&menu);
     row.set_child(Some(&widget));
-    row.set_tooltip_text(Some(&branch.name));
+    if branch.is_remote {
+        row.set_tooltip_text(Some(&branch.name));
+    } else {
+        row.set_tooltip_text(Some(&format!(
+            "{}\nDrag onto another branch to merge or rebase",
+            branch.name
+        )));
+
+        // Local branches can be dragged onto another local branch.
+        let drag = gtk::DragSource::new();
+        drag.set_actions(gtk::gdk::DragAction::COPY);
+        let dragged_name = branch.name.clone();
+        drag.connect_prepare(move |_, _, _| {
+            Some(gtk::gdk::ContentProvider::for_value(
+                &dragged_name.to_value(),
+            ))
+        });
+        row.add_controller(drag);
+
+        let sender = sender.clone();
+        let target_name = branch.name.clone();
+        let row_weak = row.downgrade();
+        let drop = gtk::DropTarget::new(glib::Type::STRING, gtk::gdk::DragAction::COPY);
+        drop.connect_enter({
+            let row_weak = row_weak.clone();
+            move |_, _, _| {
+                if let Some(row) = row_weak.upgrade() {
+                    row.add_css_class("drop-hover");
+                }
+                gtk::gdk::DragAction::COPY
+            }
+        });
+        drop.connect_leave({
+            let row_weak = row_weak.clone();
+            move |_| {
+                if let Some(row) = row_weak.upgrade() {
+                    row.remove_css_class("drop-hover");
+                }
+            }
+        });
+        drop.connect_drop(move |_, value, _, _| {
+            if let Some(row) = row_weak.upgrade() {
+                row.remove_css_class("drop-hover");
+            }
+            let Ok(source) = value.get::<String>() else {
+                return false;
+            };
+            if source == target_name {
+                return false;
+            }
+            sender(UiRequest::IntegrateBranches {
+                source,
+                target: target_name.clone(),
+            });
+            true
+        });
+        row.add_controller(drop);
+    }
 
     // Double click to checkout
     let gesture = gtk::GestureClick::new();
@@ -309,8 +368,8 @@ fn branch_popover(branch: &Branch, sender: Sender) -> gtk::Popover {
         let sender = sender.clone();
         let pop = popover.clone();
         button.connect_clicked(move |_| {
-            sender(req.clone());
             pop.popdown();
+            sender(req.clone());
         });
         box_.append(&button);
     };
@@ -361,7 +420,11 @@ fn branch_popover(branch: &Branch, sender: Sender) -> gtk::Popover {
                 false,
             );
         }
-        add("Merge into Current", UiRequest::MergeBranch(branch.name.clone()), false);
+        add(
+            "Merge into Current",
+            UiRequest::MergeBranch(branch.name.clone()),
+            false,
+        );
         add(
             "Rebase Current onto This",
             UiRequest::RebaseOnto(branch.name.clone()),
@@ -380,7 +443,11 @@ fn branch_popover(branch: &Branch, sender: Sender) -> gtk::Popover {
             UiRequest::CompareWithBranch(branch.name.clone()),
             false,
         );
-        add("Rename…", UiRequest::RenameBranch(branch.name.clone()), false);
+        add(
+            "Rename…",
+            UiRequest::RenameBranch(branch.name.clone()),
+            false,
+        );
         add(
             "Copy Branch Name",
             UiRequest::CopyText(branch.name.clone()),

@@ -5,7 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.2.0] - 2026-10-09 (alpha)
+## [Unreleased]
+
+## [0.3.0] - 2026-11-25 (alpha)
+
+### Added
+
+- Drag a local branch onto another branch to merge it into the target or
+  rebase it onto the target, with a dialog describing both choices.
+- Right-clicking a file change or a commit opens the same actions menu as the
+  three-dot button. Menu entries now include a short description.
+- An embedded terminal panel at the bottom of the repository window, opened
+  from the header bar or with ``Ctrl+` ``.
+- The terminal and Git output share the bottom area; opening one closes the
+  other.
+
+### Fixed
+
+- Deleting untracked files or discarding changes no longer freezes the window
+  when the confirmation checkbox was left unticked. The checkbox has been
+  removed; the destructive button is now the single confirmation step.
+- Plain-clicking file changes replaces the selection instead of accumulating
+  highlighted rows. Clicking an already selected change keeps it selected,
+  and Ctrl/Shift still extend the selection.
+- Menus opened from a file row now close before an action starts, so stale
+  popovers can no longer cover confirmation dialogs.
+
+## 0.2.0 - 2026-10-09 (alpha)
 
 First alpha release. The application is renamed from Stratum to GitTrellis;
 settings now live in `~/.config/gittrellis` and logs in
@@ -81,7 +107,7 @@ settings now live in `~/.config/gittrellis` and logs in
   `Publish Branch`, with one-click pull-then-push when the branch has
   diverged.
 
-## [0.1.0] - 2026-10-07
+## 0.1.0 - 2026-10-07
 
 ### Added
 
@@ -121,5 +147,4 @@ settings now live in `~/.config/gittrellis` and logs in
 - Fedora RPM spec, vendoring script and Flatpak manifest, desktop entry,
   AppStream metadata and application icon.
 
-[0.2.0]: https://example.invalid/gittrellis/releases/tag/v0.2.0
-[0.1.0]: https://example.invalid/gittrellis/releases/tag/v0.1.0
+[0.3.0]: https://github.com/RaviTex/GitTrellis/releases/tag/v0.3.0

@@ -230,6 +230,62 @@ pub fn menu_button(icon: &str, tooltip: &str) -> gtk::MenuButton {
     button
 }
 
+/// Build a menu row with an icon, a title and a short description.
+///
+/// The description is always visible below the title so that actions remain
+/// self-explanatory in both the three-dot popovers and right-click menus.
+pub fn menu_item(icon: &str, title: &str, description: &str) -> gtk::Button {
+    let button = gtk::Button::builder()
+        .has_frame(false)
+        .halign(gtk::Align::Fill)
+        .hexpand(true)
+        .build();
+    button.add_css_class("menu-item");
+
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    row.set_margin_top(2);
+    row.set_margin_bottom(2);
+    let image = gtk::Image::from_icon_name(icon);
+    image.set_pixel_size(16);
+    image.set_valign(gtk::Align::Start);
+    image.add_css_class("dim-label");
+
+    let text = gtk::Box::new(gtk::Orientation::Vertical, 1);
+    text.set_hexpand(true);
+    let title_label = gtk::Label::builder()
+        .label(title)
+        .xalign(0.0)
+        .wrap(true)
+        .build();
+    title_label.add_css_class("menu-item-title");
+    let description_label = gtk::Label::builder()
+        .label(description)
+        .xalign(0.0)
+        .wrap(true)
+        .build();
+    description_label.add_css_class("dim-label");
+    description_label.add_css_class("menu-item-description");
+    text.append(&title_label);
+    text.append(&description_label);
+
+    row.append(&image);
+    row.append(&text);
+    button.set_child(Some(&row));
+    button
+}
+
+/// Show `popover` at the pointer position inside `parent`.
+///
+/// The popover is reparented for its lifetime and unparented when closed so
+/// repeatedly opening context menus does not leak widgets.
+pub fn show_context_menu(parent: &impl IsA<gtk::Widget>, popover: &gtk::Popover, x: f64, y: f64) {
+    popover.set_parent(parent);
+    popover.set_has_arrow(false);
+    popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    popover.connect_closed(|popover| popover.unparent());
+    popover.popup();
+}
+
 /// A header row for grouped file lists such as "Staged Changes".
 pub fn list_header(title: &str) -> (gtk::Box, gtk::Label) {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);

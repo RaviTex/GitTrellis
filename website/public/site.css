@@ -1,0 +1,194 @@
+:root {
+  color-scheme: dark;
+  --background: #141715;
+  --panel: #202620;
+  --text: #f0f3eb;
+  --muted: #b7c0b5;
+  --rule: #373f38;
+  --accent: #c1eea9;
+  --mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: system-ui, sans-serif;
+  line-height: 1.55;
+  background: var(--background);
+  color: var(--text);
+}
+
+* { box-sizing: border-box; }
+body, figure, dl, dd, p { margin: 0; }
+a { color: inherit; text-underline-offset: .25em; }
+a:hover { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
+img { display: block; max-width: 100%; height: auto; }
+h1, h2 { margin: 0; line-height: 1.04; letter-spacing: -.055em; }
+h2 { font-size: clamp(2rem, 4vw, 3.125rem); }
+
+.wrap {
+  width: min(100% - 3rem, 69rem);
+  margin-inline: auto;
+}
+
+.skip {
+  position: absolute;
+  z-index: 1;
+  inset: .75rem auto auto .75rem;
+  padding: .6rem 1rem;
+  background: var(--background);
+  transform: translateY(-200%);
+}
+
+.skip:focus { transform: none; }
+
+.masthead, .footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding-block: 1.25rem;
+}
+
+.masthead { border-bottom: 1px solid var(--rule); }
+
+.brand, nav {
+  display: flex;
+  align-items: center;
+  gap: clamp(.85rem, 3vw, 1.75rem);
+}
+
+.brand {
+  gap: .55rem;
+  font-size: 1.125rem;
+  font-weight: 720;
+  letter-spacing: -.025em;
+  text-decoration: none;
+}
+
+nav a {
+  font-size: .9375rem;
+  text-decoration: none;
+}
+
+nav a:hover { text-decoration: underline; }
+
+.intro, .workflow, .install {
+  display: grid;
+  gap: clamp(1.75rem, 5vw, 4rem);
+}
+
+.intro {
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  align-items: end;
+  padding-block: clamp(3rem, 8vw, 6.25rem) clamp(2.25rem, 5vw, 4rem);
+}
+
+.platform, .build-label, figcaption, .footer {
+  color: var(--muted);
+  font-size: .875rem;
+}
+
+.platform, .build-label { font-family: var(--mono); }
+
+.platform {
+  margin-bottom: 1rem;
+  color: var(--accent);
+}
+
+h1 {
+  font-size: clamp(3.1rem, 7.6vw, 6.5rem);
+  font-weight: 720;
+}
+
+.intro-detail {
+  display: grid;
+  justify-items: start;
+  gap: .625rem;
+}
+
+.intro-detail p {
+  margin-bottom: .625rem;
+  max-width: 31ch;
+  font-size: clamp(1.0625rem, 2vw, 1.25rem);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 3rem;
+  padding: .55rem 1rem;
+  border-radius: .4rem;
+  background: var(--accent);
+  color: #172516;
+  font-weight: 720;
+  text-decoration: none;
+}
+
+.button:hover {
+  background: #d3f7c0;
+  color: #172516;
+  text-decoration: underline;
+}
+
+.product-frame {
+  overflow: hidden;
+  padding: clamp(.375rem, 1.3vw, .875rem);
+  border: 1px solid #49564a;
+  border-radius: .85rem;
+  background: linear-gradient(135deg, #303f30, #1d241e);
+}
+
+.product img, .history img {
+  width: 100%;
+  border-radius: .45rem;
+}
+
+figcaption { margin-top: .65rem; }
+
+.ruled {
+  margin-top: clamp(3rem, 7vw, 5.5rem);
+  padding-top: clamp(2rem, 5vw, 3.6rem);
+  border-top: 1px solid var(--rule);
+}
+
+.workflow { grid-template-columns: 1fr 1fr; }
+
+.features {
+  display: grid;
+  gap: 1.25rem;
+  margin-top: 1.75rem;
+}
+
+.features dt { font-weight: 700; }
+.features dd, .install p { color: var(--muted); }
+.history { align-self: center; }
+.history img { border: 1px solid #49564a; }
+.install { grid-template-columns: 1fr 1fr; align-items: center; }
+.install p { margin-block: 1rem .75rem; }
+.install a { color: var(--accent); }
+
+pre {
+  margin: 0;
+  padding: 1.25rem;
+  border: 1px solid var(--rule);
+  border-radius: .55rem;
+  background: var(--panel);
+  font-size: .9375rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+code { font-family: var(--mono); }
+
+.footer {
+  margin-top: clamp(3rem, 7vw, 5rem);
+  border-top: 1px solid var(--rule);
+}
+
+@media (max-width: 47rem) {
+  .intro, .workflow, .install { grid-template-columns: 1fr; }
+  .wide-break { display: none; }
+  .intro-detail p { max-width: 38ch; }
+}
+
+@media (max-width: 25rem) {
+  .wrap { width: calc(100% - 2rem); }
+  h1 { font-size: clamp(2.65rem, 13vw, 3.1rem); }
+}

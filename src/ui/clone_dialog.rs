@@ -50,12 +50,8 @@ pub fn show(parent: &impl IsA<gtk::Window>, settings: Settings, on_cloned: Rc<dy
         .subtitle(&settings.clone_default_dir)
         .build();
     dest_row.add_suffix(&dest_button);
-    let name_entry = adw::EntryRow::builder()
-        .title("Directory name")
-        .build();
-    let branch_entry = adw::EntryRow::builder()
-        .title("Branch (optional)")
-        .build();
+    let name_entry = adw::EntryRow::builder().title("Directory name").build();
+    let branch_entry = adw::EntryRow::builder().title("Branch (optional)").build();
     let shallow_row = adw::SwitchRow::builder()
         .title("Shallow clone")
         .subtitle("Fetch only the latest revision (faster for large repositories)")
@@ -214,7 +210,11 @@ pub fn show(parent: &impl IsA<gtk::Window>, settings: Settings, on_cloned: Rc<dy
             });
             dest_row.set_subtitle(&dest.to_string_lossy());
             let branch = branch_entry.text().trim().to_string();
-            let branch = if branch.is_empty() { None } else { Some(branch) };
+            let branch = if branch.is_empty() {
+                None
+            } else {
+                Some(branch)
+            };
             let depth = if shallow_row.is_active() {
                 Some(depth_row.value() as u32)
             } else {
@@ -231,15 +231,20 @@ pub fn show(parent: &impl IsA<gtk::Window>, settings: Settings, on_cloned: Rc<dy
             let window_ui = window.clone();
             let op = tasks::run_streaming(
                 move |cancel, progress| {
-                    Repository::clone(&url, &dest_clone, branch.as_deref(), depth, Some(cancel), progress)
-                        .map(|_| ())
+                    Repository::clone(
+                        &url,
+                        &dest_clone,
+                        branch.as_deref(),
+                        depth,
+                        Some(cancel),
+                        progress,
+                    )
+                    .map(|_| ())
                 },
                 move |line| {
                     status_ui.set_label(&line);
                     let mut end = log_view_ui.buffer().end_iter();
-                    log_view_ui
-                        .buffer()
-                        .insert(&mut end, &format!("{line}\n"));
+                    log_view_ui.buffer().insert(&mut end, &format!("{line}\n"));
                     let mut end = log_view_ui.buffer().end_iter();
                     log_view_ui.scroll_to_iter(&mut end, 0.0, false, 0.0, 0.0);
                 },
@@ -361,7 +366,11 @@ pub fn show_init(parent: &impl IsA<gtk::Window>, on_initialized: Rc<dyn Fn(PathB
                 return;
             }
             let branch = branch_entry.text().trim().to_string();
-            let branch = if branch.is_empty() { None } else { Some(branch) };
+            let branch = if branch.is_empty() {
+                None
+            } else {
+                Some(branch)
+            };
             match Repository::init(&dir, branch.as_deref()) {
                 Ok(_) => {
                     window.close();

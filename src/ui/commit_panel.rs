@@ -147,7 +147,10 @@ impl CommitPanel {
         if messages.is_empty() {
             let empty = gtk::Label::builder()
                 .label("No recent messages")
-                .margin_start(8).margin_end(8).margin_top(8).margin_bottom(8)
+                .margin_start(8)
+                .margin_end(8)
+                .margin_top(8)
+                .margin_bottom(8)
                 .build();
             empty.add_css_class("dim-label");
             list.append(&empty);

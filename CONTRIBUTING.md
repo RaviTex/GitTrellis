@@ -7,9 +7,9 @@ project is structured, the conventions we follow, and how to verify changes.
 
 ```bash
 sudo dnf install git gtk4-devel libadwaita-devel desktop-file-utils \
-    libappstream-glib rust cargo
-git clone <repository-url> gittrellis
-cd gittrellis
+    libappstream-glib vte291-gtk4-devel rust cargo
+git clone https://github.com/RaviTex/GitTrellis.git
+cd GitTrellis
 cargo test
 cargo run -- /path/to/a/repository
 ```
@@ -74,6 +74,14 @@ merge request when the change is visual.
 `scripts/make-source-tarball.sh` vendors dependencies; `scripts/build-rpm.sh`
 builds the RPM. If you add data files (desktop entry, icon, metadata), install
 them from the spec and the Flatpak manifest as well.
+
+GitHub Actions runs the tests on Fedora 45. To publish an alpha, increase the
+version in `Cargo.toml`, refresh `Cargo.lock`, and match the version in the RPM
+spec and the first AppStream release entry. Set the RPM Release back to
+`1%{?dist}` and add a versioned changelog section for the release notes. A
+successful push to `main` publishes that version with the Fedora x86_64 RPM,
+vendored source tarball and checksums. Re-run the version-bump workflow from
+GitHub Actions if publishing fails.
 
 ## Security
 

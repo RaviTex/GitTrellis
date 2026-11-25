@@ -2,25 +2,27 @@
 %global debug_package %{nil}
 
 Name:           gittrellis
-Version:        0.2.0
-Release:        2%{?dist}
+Version:        0.3.0
+Release:        1%{?dist}
 Summary:        Native Git GUI client for Linux (alpha)
 
 License:        GPL-3.0-or-later
-URL:            https://example.invalid/gittrellis
+URL:            https://gittrellis.vercel.app
 # The source tarball is produced by scripts/make-source-tarball.sh and embeds
 # the vendored Rust dependencies, so the build works without network access.
 Source0:        %{name}-%{version}.tar.gz
 
-BuildRequires:  rust >= 1.85
+BuildRequires:  rust >= 1.92
 BuildRequires:  cargo
 BuildRequires:  gtk4-devel >= 4.12
 BuildRequires:  libadwaita-devel >= 1.4
+BuildRequires:  vte291-gtk4-devel
 BuildRequires:  desktop-file-utils
 BuildRequires:  libappstream-glib
 Requires:       git
 Requires:       gtk4%{?_isa} >= 4.12
 Requires:       libadwaita%{?_isa} >= 1.4
+Requires:       vte291-gtk4%{?_isa}
 
 %description
 GitTrellis is a native Git client for Linux built with GTK4 and libadwaita.
@@ -36,7 +38,7 @@ the standard Git tooling (SSH agent, credential helpers, known hosts).
 %build
 export CARGO_HOME=%{_builddir}/cargo-home
 export CARGO_NET_OFFLINE=true
-cargo build --release --offline
+cargo build --release --locked --offline
 
 %install
 install -Dpm 0755 target/release/gittrellis %{buildroot}%{_bindir}/gittrellis
@@ -68,6 +70,15 @@ update-desktop-database %{_datadir}/applications &>/dev/null || :
 %{_datadir}/icons/hicolor/scalable/apps/%{app_id}.svg
 
 %changelog
+* Wed Nov 25 2026 GitTrellis contributors <maintainers@example.invalid> - 0.3.0-1
+- Publish the first GitHub alpha for Fedora 45
+
+* Wed Nov 25 2026 GitTrellis contributors <maintainers@example.invalid> - 0.2.0-3
+- Add drag-and-drop branch merge/rebase
+- Add right-click action menus for changes and commits
+- Add an embedded VTE terminal panel
+- Fix the destructive-confirmation freeze and the file-selection toggle
+
 * Fri Oct 09 2026 GitTrellis contributors <maintainers@example.invalid> - 0.2.0-2
 - Fix publishing a branch from the push dialog: pressing Push did nothing
   because short branch names were rejected silently

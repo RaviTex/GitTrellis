@@ -151,6 +151,12 @@ pub const DEFS: &[ShortcutDef] = &[
         section: "Navigation",
         defaults: &["F9"],
     },
+    ShortcutDef {
+        action: "toggle-terminal",
+        label: "Toggle terminal",
+        section: "Navigation",
+        defaults: &["<Control>grave"],
+    },
 ];
 
 /// The effective accelerators for one action, honouring user overrides.
@@ -469,8 +475,15 @@ mod tests {
     #[test]
     fn choice_application() {
         let mut settings = Settings::default();
-        apply_choice(&mut settings, "fetch", &ShortcutChoice::Custom("<Control>g".into()));
-        assert_eq!(settings.shortcut_overrides.get("fetch").unwrap(), "<Control>g");
+        apply_choice(
+            &mut settings,
+            "fetch",
+            &ShortcutChoice::Custom("<Control>g".into()),
+        );
+        assert_eq!(
+            settings.shortcut_overrides.get("fetch").unwrap(),
+            "<Control>g"
+        );
         apply_choice(&mut settings, "fetch", &ShortcutChoice::Disabled);
         assert_eq!(settings.shortcut_overrides.get("fetch").unwrap(), "");
         apply_choice(&mut settings, "fetch", &ShortcutChoice::Reset);

@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
+use vte4::prelude::*;
 
 use crate::core::{load_snapshot, RepoSnapshot, Settings, SnapshotOptions};
 use crate::git::{
@@ -17,12 +18,12 @@ use crate::git::{
 };
 
 use super::changes_view::ChangesView;
-use super::history_view::{HistoryView, SearchField};
-use super::{branches_view::BranchesView, conflict_view::ConflictView, remotes_view::RemotesView};
-use super::{stashes_view::StashesView, tags_view::TagsView};
 use super::diff_view::DiffMode;
+use super::history_view::{HistoryView, SearchField};
 use super::tasks::{self, StreamingOp};
 use super::util;
+use super::{branches_view::BranchesView, conflict_view::ConflictView, remotes_view::RemotesView};
+use super::{stashes_view::StashesView, tags_view::TagsView};
 
 pub type Sender = Rc<dyn Fn(UiRequest)>;
 
@@ -100,6 +101,10 @@ pub enum UiRequest {
     RenameBranch(String),
     MergeBranch(String),
     RebaseOnto(String),
+    IntegrateBranches {
+        source: String,
+        target: String,
+    },
     SetUpstream(String),
     CompareWithBranch(String),
     CompareBranches,
@@ -227,6 +232,12 @@ pub struct RepoPage {
     progress_bar: gtk::ProgressBar,
     cancel_button: gtk::Button,
     output_view: gtk::TextView,
+    output_expander: gtk::Expander,
+    terminal_panel: gtk::Box,
+    terminal_button: gtk::ToggleButton,
+    terminal: vte4::Terminal,
+    terminal_pid: RefCell<Option<glib::Pid>>,
+    terminal_spawning: std::cell::Cell<bool>,
     state: RefCell<RepoState>,
     request: RefCell<Option<Sender>>,
     settings: RefCell<Settings>,
@@ -270,7 +281,8 @@ impl RepoPage {
         header.set_title_widget(Some(&title_box));
 
         let fetch_button = util::icon_button("view-refresh-symbolic", "Fetch (Ctrl+Shift+F)");
-        let pull_button = util::icon_button("go-down-symbolic", "Pull from upstream (Ctrl+Shift+P)");
+        let pull_button =
+            util::icon_button("go-down-symbolic", "Pull from upstream (Ctrl+Shift+P)");
         let push_button = util::icon_button("go-up-symbolic", "Push to upstream (Ctrl+P)");
         let refresh_button = util::icon_button("emblem-synchronizing-symbolic", "Refresh (Ctrl+R)");
         let menu_button = util::menu_button("open-menu-symbolic", "Repository menu");
@@ -409,20 +421,75 @@ impl RepoPage {
             .child(&output_scroll)
             .build();
 
+        // ---------------- embedded terminal ----------------
+        let terminal = vte4::Terminal::new();
+        terminal.set_vexpand(true);
+        terminal.set_hexpand(true);
+        terminal.set_scrollback_lines(10_000);
+        terminal.set_mouse_autohide(true);
+        let font = gtk::pango::FontDescription::from_string("Monospace 10");
+        terminal.set_font(Some(&font));
+        terminal.add_css_class("terminal");
+
+        let terminal_scroll = gtk::ScrolledWindow::builder()
+            .child(&terminal)
+            .vexpand(true)
+            .hexpand(true)
+            .vscrollbar_policy(gtk::PolicyType::Automatic)
+            .build();
+
+        let terminal_header = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        terminal_header.set_margin_top(2);
+        terminal_header.set_margin_bottom(2);
+        terminal_header.set_margin_start(8);
+        terminal_header.set_margin_end(4);
+        let terminal_title = gtk::Label::builder()
+            .label("Terminal")
+            .xalign(0.0)
+            .hexpand(true)
+            .build();
+        terminal_title.add_css_class("heading");
+        let terminal_clear = util::icon_button("edit-clear-symbolic", "Clear terminal");
+        let terminal_close = util::icon_button("window-close-symbolic", "Close terminal");
+        terminal_header.append(&terminal_title);
+        terminal_header.append(&terminal_clear);
+        terminal_header.append(&terminal_close);
+        {
+            let terminal = terminal.clone();
+            terminal_clear.connect_clicked(move |_| {
+                terminal.reset(true, true);
+            });
+        }
+
+        let terminal_panel = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        terminal_panel.add_css_class("terminal-panel");
+        terminal_panel.set_height_request(320);
+        terminal_panel.set_visible(false);
+        terminal_panel.append(&terminal_header);
+        terminal_panel.append(&terminal_scroll);
+
         bottom.append(&progress_box);
+        bottom.append(&terminal_panel);
         bottom.append(&output_expander);
         toolbar_view.add_bottom_bar(&bottom);
 
         let output_expander_for_sync = output_expander.clone();
         let output_button = gtk::ToggleButton::builder()
-            .icon_name("utilities-terminal-symbolic")
+            .icon_name("text-x-generic-symbolic")
             .tooltip_text("Show Git output")
             .build();
         output_button.add_css_class("flat");
-        output_button.bind_property("active", &output_expander_for_sync, "expanded")
+        output_button
+            .bind_property("active", &output_expander_for_sync, "expanded")
             .bidirectional()
             .sync_create()
             .build();
+        let terminal_button = gtk::ToggleButton::builder()
+            .icon_name("utilities-terminal-symbolic")
+            .tooltip_text("Toggle terminal (Ctrl+`)")
+            .build();
+        terminal_button.add_css_class("flat");
+        header.pack_start(&terminal_button);
         header.pack_start(&output_button);
 
         root.set_vexpand(true);
@@ -512,6 +579,38 @@ impl RepoPage {
                     repo_path.clone(),
                 )));
             }
+            {
+                let w = weak.clone();
+                terminal_button.connect_toggled(move |button| {
+                    if let Some(p) = w.upgrade() {
+                        p.on_terminal_toggled(button.is_active());
+                    }
+                });
+            }
+            {
+                let w = weak.clone();
+                terminal_close.connect_clicked(move |_| {
+                    if let Some(p) = w.upgrade() {
+                        p.terminal_button.set_active(false);
+                    }
+                });
+            }
+            {
+                let terminal_button = terminal_button.clone();
+                output_expander.connect_expanded_notify(move |expander| {
+                    if expander.is_expanded() {
+                        terminal_button.set_active(false);
+                    }
+                });
+            }
+            {
+                let w = weak.clone();
+                terminal.connect_child_exited(move |_, _| {
+                    if let Some(p) = w.upgrade() {
+                        p.terminal_pid.borrow_mut().take();
+                    }
+                });
+            }
 
             let page_settings = settings.clone();
             let page = Self {
@@ -540,6 +639,12 @@ impl RepoPage {
                 progress_bar: progress_bar.clone(),
                 cancel_button: cancel_button.clone(),
                 output_view: output_view.clone(),
+                output_expander: output_expander.clone(),
+                terminal_panel: terminal_panel.clone(),
+                terminal_button: terminal_button.clone(),
+                terminal: terminal.clone(),
+                terminal_pid: RefCell::new(None),
+                terminal_spawning: std::cell::Cell::new(false),
                 state: RefCell::new(RepoState {
                     history_limit: 2000,
                     ..Default::default()
@@ -549,9 +654,14 @@ impl RepoPage {
             };
             let settings = page.settings.borrow().clone();
             page.changes.set_show_ignored(settings.show_ignored_files);
-            page.changes.set_diff_mode(diff_mode_from(settings.diff_view_mode));
-            page.changes.commit_panel().set_signoff(settings.commit_sign_off);
-            page.changes.commit_panel().set_gpg(settings.commit_gpg_sign);
+            page.changes
+                .set_diff_mode(diff_mode_from(settings.diff_view_mode));
+            page.changes
+                .commit_panel()
+                .set_signoff(settings.commit_sign_off);
+            page.changes
+                .commit_panel()
+                .set_gpg(settings.commit_gpg_sign);
             page
         });
 
@@ -604,7 +714,11 @@ impl RepoPage {
     }
 
     fn error(&self, error: &GitError) {
-        crate::log_error!("{}: {}", self.repo.display_name(), error.technical_details());
+        crate::log_error!(
+            "{}: {}",
+            self.repo.display_name(),
+            error.technical_details()
+        );
         match self.window() {
             Some(window) => super::error_dialog::show(&window, error),
             None => {
@@ -624,7 +738,8 @@ impl RepoPage {
         drop(state);
         self.output_view.buffer().set_text(&text);
         let mut end = self.output_view.buffer().end_iter();
-        self.output_view.scroll_to_iter(&mut end, 0.0, false, 0.0, 0.0);
+        self.output_view
+            .scroll_to_iter(&mut end, 0.0, false, 0.0, 0.0);
     }
 
     fn set_progress(&self, label: Option<&str>) {
@@ -661,6 +776,66 @@ impl RepoPage {
             self.progress_label.set_label("Cancelling…");
             self.cancel_button.set_sensitive(false);
         }
+    }
+
+    fn on_terminal_toggled(self: &Rc<Self>, active: bool) {
+        self.terminal_panel.set_visible(active);
+        if active {
+            // Terminal and Git output share the bottom area.
+            self.output_expander.set_expanded(false);
+            self.ensure_terminal();
+            self.terminal.grab_focus();
+        }
+    }
+
+    fn ensure_terminal(self: &Rc<Self>) {
+        if self.terminal_pid.borrow().is_some() || self.terminal_spawning.get() {
+            return;
+        }
+        let shell = std::env::var("SHELL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| {
+                if std::path::Path::new("/bin/bash").exists() {
+                    "/bin/bash".to_string()
+                } else {
+                    "/bin/sh".to_string()
+                }
+            });
+        let cwd = self.repo_path.to_string_lossy().to_string();
+        let env = ["TERM=xterm-256color", "COLORTERM=truecolor"];
+        let weak = Rc::downgrade(self);
+        self.terminal_spawning.set(true);
+        self.terminal.spawn_async(
+            vte4::PtyFlags::DEFAULT,
+            Some(&cwd),
+            &[shell.as_str()],
+            &env,
+            glib::SpawnFlags::DEFAULT,
+            || {},
+            -1,
+            None::<&gio::Cancellable>,
+            move |result| {
+                let Some(page) = weak.upgrade() else { return };
+                page.terminal_spawning.set(false);
+                match result {
+                    Ok(pid) => {
+                        *page.terminal_pid.borrow_mut() = Some(pid);
+                    }
+                    Err(error) => {
+                        crate::log_warn!("could not start terminal: {error}");
+                        page.toast(&format!("Could not start terminal: {error}"));
+                        page.terminal_button.set_active(false);
+                    }
+                }
+            },
+        );
+    }
+
+    /// Open or hide the embedded terminal.
+    pub fn toggle_terminal(&self) {
+        self.terminal_button
+            .set_active(!self.terminal_button.is_active());
     }
 
     // -----------------------------------------------------------------
@@ -780,10 +955,7 @@ impl RepoPage {
                     pending
                 };
                 for (section, error) in &errors {
-                    crate::log_warn!(
-                        "failed to load {section}: {}",
-                        error.user_message()
-                    );
+                    crate::log_warn!("failed to load {section}: {}", error.user_message());
                 }
                 page.state.borrow_mut().snapshot = snapshot;
                 page.render();
@@ -813,7 +985,8 @@ impl RepoPage {
         let snapshot = state.snapshot.clone();
         drop(state);
 
-        self.changes.set_show_ignored(self.settings.borrow().show_ignored_files);
+        self.changes
+            .set_show_ignored(self.settings.borrow().show_ignored_files);
         self.changes.render(&snapshot.status);
         self.branches.render(&snapshot.branches);
         self.tags.render(&snapshot.tags);
@@ -843,10 +1016,7 @@ impl RepoPage {
         let branch_name = if status.detached {
             "detached HEAD".to_string()
         } else {
-            status
-                .head_name
-                .clone()
-                .unwrap_or_else(|| "unborn".into())
+            status.head_name.clone().unwrap_or_else(|| "unborn".into())
         };
         self.branch_label.set_label(&branch_name);
         let mut sync = String::new();
@@ -866,7 +1036,8 @@ impl RepoPage {
             self.op_banner.set_visible(false);
         } else {
             self.op_banner.set_visible(true);
-            self.op_label.set_label(&util::operation_label(&status.operation));
+            self.op_label
+                .set_label(&util::operation_label(&status.operation));
         }
     }
 
@@ -896,16 +1067,10 @@ impl RepoPage {
             .iter()
             .filter(|b| !b.is_remote)
             .collect::<Vec<_>>();
-        locals.sort_by(|a, b| {
-            b.is_head
-                .cmp(&a.is_head)
-                .then_with(|| a.name.cmp(&b.name))
-        });
+        locals.sort_by(|a, b| b.is_head.cmp(&a.is_head).then_with(|| a.name.cmp(&b.name)));
 
-        let names: Vec<(String, bool)> = locals
-            .iter()
-            .map(|b| (b.name.clone(), b.is_head))
-            .collect();
+        let names: Vec<(String, bool)> =
+            locals.iter().map(|b| (b.name.clone(), b.is_head)).collect();
         for (name, is_head) in names {
             let button = gtk::Button::builder()
                 .label(if is_head {
@@ -1007,9 +1172,7 @@ impl RepoPage {
                     match field {
                         SearchField::Message => options.grep = Some(query.clone()),
                         SearchField::Author => options.author = Some(query.clone()),
-                        SearchField::Path => {
-                            options.paths = vec![path_substring_pathspec(query)]
-                        }
+                        SearchField::Path => options.paths = vec![path_substring_pathspec(query)],
                         SearchField::Hash => {
                             options.grep = Some(query.clone());
                         }
@@ -1053,9 +1216,7 @@ impl RepoPage {
                     match field {
                         SearchField::Message => options.grep = Some(query.clone()),
                         SearchField::Author => options.author = Some(query.clone()),
-                        SearchField::Path => {
-                            options.paths = vec![path_substring_pathspec(query)]
-                        }
+                        SearchField::Path => options.paths = vec![path_substring_pathspec(query)],
                         SearchField::Hash => {}
                     }
                 }
@@ -1292,7 +1453,10 @@ impl RepoPage {
                 super::confirm::confirm_dangerous(
                     &window,
                     "Delete untracked files?",
-                    &format!("{} untracked file(s) will be permanently deleted.", paths.len()),
+                    &format!(
+                        "{} untracked file(s) will be permanently deleted.",
+                        paths.len()
+                    ),
                     "Untracked files are not stored in Git. This cannot be undone.",
                     "Delete Files",
                     move || {
@@ -1371,10 +1535,8 @@ impl RepoPage {
                     move || {
                         let ignore_path = repo.workdir().join(".gitignore");
                         let content = std::fs::read_to_string(&ignore_path).unwrap_or_default();
-                        let filtered: Vec<&str> = content
-                            .lines()
-                            .filter(|l| l.trim() != file_name)
-                            .collect();
+                        let filtered: Vec<&str> =
+                            content.lines().filter(|l| l.trim() != file_name).collect();
                         let mut new_content = filtered.join("\n");
                         if !new_content.is_empty() {
                             new_content.push('\n');
@@ -1578,6 +1740,9 @@ impl RepoPage {
             }
             UiRequest::MergeBranch(name) => self.confirm_merge(name),
             UiRequest::RebaseOnto(name) => self.confirm_rebase(name),
+            UiRequest::IntegrateBranches { source, target } => {
+                self.integrate_branches_dialog(source, target)
+            }
             UiRequest::SetUpstream(name) => {
                 let repo = self.repo.clone();
                 let current = self
@@ -1701,9 +1866,7 @@ impl RepoPage {
                 self.run(
                     move || repo.checkout_detached(&name),
                     move |page, _| {
-                        page.toast(&format!(
-                            "Checked out tag {name_for_msg} (detached HEAD)"
-                        ));
+                        page.toast(&format!("Checked out tag {name_for_msg} (detached HEAD)"));
                         page.refresh_all();
                     },
                 );
@@ -1841,7 +2004,9 @@ impl RepoPage {
                 super::confirm::confirm(
                     &window,
                     "Remove remote?",
-                    &format!("The remote `{name}` and its remote-tracking branches will be removed."),
+                    &format!(
+                        "The remote `{name}` and its remote-tracking branches will be removed."
+                    ),
                     "Remove Remote",
                     true,
                     move || {
@@ -2100,22 +2265,20 @@ impl RepoPage {
                     let target = target.clone();
                     page.run(
                         move || repo.merge(&target, false, false, None),
-                        move |page, outcome| {
-                            match outcome {
-                                MergeOutcome::Conflicts(_) => {
-                                    page.toast("Merge conflicts need resolution");
-                                    page.view_stack.set_visible_child_name("conflicts");
-                                    page.refresh_all();
-                                }
-                                MergeOutcome::UpToDate => page.toast("Already up to date"),
-                                MergeOutcome::FastForward => {
-                                    page.toast("Fast-forward merge");
-                                    page.refresh_all();
-                                }
-                                MergeOutcome::Merged => {
-                                    page.toast("Merge commit created");
-                                    page.refresh_all();
-                                }
+                        move |page, outcome| match outcome {
+                            MergeOutcome::Conflicts(_) => {
+                                page.toast("Merge conflicts need resolution");
+                                page.view_stack.set_visible_child_name("conflicts");
+                                page.refresh_all();
+                            }
+                            MergeOutcome::UpToDate => page.toast("Already up to date"),
+                            MergeOutcome::FastForward => {
+                                page.toast("Fast-forward merge");
+                                page.refresh_all();
+                            }
+                            MergeOutcome::Merged => {
+                                page.toast("Merge commit created");
+                                page.refresh_all();
                             }
                         },
                     );
@@ -2162,6 +2325,162 @@ impl RepoPage {
                             }
                         },
                     );
+                }
+            },
+        );
+    }
+
+    fn integrate_branches_dialog(self: &Rc<Self>, source: String, target: String) {
+        if source == target {
+            return;
+        }
+        let known = {
+            let state = self.state.borrow();
+            let is_local = |name: &str| {
+                state
+                    .snapshot
+                    .branches
+                    .iter()
+                    .any(|branch| !branch.is_remote && branch.name == name)
+            };
+            is_local(&source) && is_local(&target)
+        };
+        if !known {
+            self.toast("Unknown branch");
+            return;
+        }
+        let Some(window) = self.window() else { return };
+        let head = self.state.borrow().snapshot.status.head_name.clone();
+        let target_is_head = head.as_deref() == Some(target.as_str());
+        let source_is_head = head.as_deref() == Some(source.as_str());
+
+        let dialog = adw::MessageDialog::new(
+            Some(&window),
+            Some("Integrate branches"),
+            Some(&format!(
+                "Choose how to integrate `{source}` with `{target}`."
+            )),
+        );
+
+        let box_ = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let group = gtk::CheckButton::new();
+        group.set_visible(false);
+        let merge = gtk::CheckButton::with_label(&format!("Merge {source} into {target}"));
+        merge.set_group(Some(&group));
+        merge.set_active(true);
+        let rebase = gtk::CheckButton::with_label(&format!("Rebase {source} onto {target}"));
+        rebase.set_group(Some(&group));
+        let explanation = gtk::Label::builder().xalign(0.0).wrap(true).build();
+        explanation.add_css_class("dim-label");
+
+        let merge_text = if target_is_head {
+            format!("Merges {source} into the checked-out branch {target}.")
+        } else {
+            format!("Checks out {target}, then merges {source} into it.")
+        };
+        let rebase_text = if source_is_head {
+            format!("Reapplies the commits of {source} on top of {target}. History is rewritten.")
+        } else {
+            format!(
+                "Checks out {source}, then reapplies its commits on top of {target}. History is rewritten."
+            )
+        };
+        explanation.set_label(&merge_text);
+        {
+            let explanation = explanation.clone();
+            let merge_text = merge_text.clone();
+            merge.connect_toggled(move |button| {
+                if button.is_active() {
+                    explanation.set_label(&merge_text);
+                }
+            });
+        }
+        {
+            let explanation = explanation.clone();
+            rebase.connect_toggled(move |button| {
+                if button.is_active() {
+                    explanation.set_label(&rebase_text);
+                }
+            });
+        }
+
+        box_.append(&merge);
+        box_.append(&rebase);
+        box_.append(&explanation);
+        dialog.set_extra_child(Some(&box_));
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("ok", "Continue");
+        dialog.set_response_appearance("ok", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("ok"));
+        dialog.set_close_response("cancel");
+
+        let weak = Rc::downgrade(self);
+        dialog.connect_response(None, move |_, response| {
+            if response != "ok" {
+                return;
+            }
+            let Some(page) = weak.upgrade() else { return };
+            if merge.is_active() {
+                page.perform_branch_merge(source.clone(), target.clone());
+            } else {
+                page.perform_branch_rebase(source.clone(), target.clone());
+            }
+        });
+        dialog.present();
+    }
+
+    fn perform_branch_merge(self: &Rc<Self>, source: String, target: String) {
+        let repo = self.repo.clone();
+        let head = self.state.borrow().snapshot.status.head_name.clone();
+        let source_for_msg = source.clone();
+        let target_for_msg = target.clone();
+        self.run(
+            move || {
+                if head.as_deref() != Some(target.as_str()) {
+                    repo.checkout_branch(&target)?;
+                }
+                repo.merge(&source, false, false, None)
+            },
+            move |page, outcome| {
+                match outcome {
+                    MergeOutcome::Conflicts(_) => {
+                        page.toast("Merge stopped with conflicts");
+                        page.view_stack.set_visible_child_name("conflicts");
+                    }
+                    MergeOutcome::UpToDate => page.toast("Already up to date"),
+                    MergeOutcome::FastForward => page.toast(&format!(
+                        "Fast-forwarded {target_for_msg} to {source_for_msg}"
+                    )),
+                    MergeOutcome::Merged => {
+                        page.toast(&format!("Merged {source_for_msg} into {target_for_msg}"))
+                    }
+                }
+                page.refresh_all();
+            },
+        );
+    }
+
+    fn perform_branch_rebase(self: &Rc<Self>, source: String, target: String) {
+        let repo = self.repo.clone();
+        let head = self.state.borrow().snapshot.status.head_name.clone();
+        let source_for_msg = source.clone();
+        let target_for_msg = target.clone();
+        self.run(
+            move || {
+                if head.as_deref() != Some(source.as_str()) {
+                    repo.checkout_branch(&source)?;
+                }
+                repo.rebase(Some(&target), None, None)
+            },
+            move |page, outcome| match outcome {
+                MergeOutcome::Conflicts(_) => {
+                    page.toast("Rebase stopped with conflicts");
+                    page.view_stack.set_visible_child_name("conflicts");
+                    page.refresh_all();
+                }
+                _ => {
+                    page.toast(&format!("Rebased {source_for_msg} onto {target_for_msg}"));
+                    page.refresh_all();
                 }
             },
         );
@@ -2268,7 +2587,9 @@ impl RepoPage {
                 super::confirm::confirm_dangerous(
                     &window,
                     "Hard reset?",
-                    &format!("The branch will move to {short} and all uncommitted changes will be lost."),
+                    &format!(
+                        "The branch will move to {short} and all uncommitted changes will be lost."
+                    ),
                     "Hard reset discards staged and unstaged changes. This cannot be undone.",
                     "Hard Reset",
                     move || {
@@ -2295,31 +2616,24 @@ impl RepoPage {
         );
     }
 
-    fn accept_conflict(
-        self: &Rc<Self>,
-        path: PathBuf,
-        choice: Option<(usize, ConflictChoice)>,
-    ) {
+    fn accept_conflict(self: &Rc<Self>, path: PathBuf, choice: Option<(usize, ConflictChoice)>) {
         let repo = self.repo.clone();
         let path_clone = path.clone();
         let weak = Rc::downgrade(self);
         tasks::run_blocking(
             move || {
-                let text = repo
-                    .read_worktree_file(&path_clone)?
-                    .ok_or_else(|| GitError::InvalidState {
+                let text = repo.read_worktree_file(&path_clone)?.ok_or_else(|| {
+                    GitError::InvalidState {
                         message: "The conflicted file is binary or unreadable.".into(),
-                        recovery: Some(
-                            "Use \"Keep Current\" or \"Keep Incoming\" instead.".into(),
-                        ),
-                    })?;
+                        recovery: Some("Use \"Keep Current\" or \"Keep Incoming\" instead.".into()),
+                    }
+                })?;
                 let regions = crate::git::parse_conflict_regions(&text);
                 if regions.is_empty() {
                     return Err(GitError::InvalidState {
                         message: "No conflict markers found in this file.".into(),
                         recovery: Some(
-                            "The file may already be resolved; mark it as resolved instead."
-                                .into(),
+                            "The file may already be resolved; mark it as resolved instead.".into(),
                         ),
                     });
                 }
@@ -2416,7 +2730,8 @@ impl RepoPage {
         self.run(
             move || match &operation {
                 OperationState::Rebase { .. } => repo.rebase_skip(),
-                OperationState::CherryPick { .. } => repo.command()
+                OperationState::CherryPick { .. } => repo
+                    .command()
                     .args(["cherry-pick", "--skip"])
                     .run()
                     .map(|_| MergeOutcome::Merged),
@@ -2458,11 +2773,9 @@ impl RepoPage {
                             OperationState::Rebase { .. } => repo.rebase_abort(),
                             OperationState::CherryPick { .. } => repo.cherry_pick_abort(),
                             OperationState::Revert { .. } => repo.revert_abort(),
-                            OperationState::Bisect => repo
-                                .command()
-                                .args(["bisect", "reset"])
-                                .run()
-                                .map(|_| ()),
+                            OperationState::Bisect => {
+                                repo.command().args(["bisect", "reset"]).run().map(|_| ())
+                            }
                             OperationState::None => Ok(()),
                         },
                         |page, _| {
@@ -2491,17 +2804,15 @@ impl RepoPage {
             move |cancel, progress| {
                 repo.fetch(remote.as_deref(), prune, tags, Some(cancel), progress)
             },
-            |page, result| {
-                match result {
-                    Ok(()) => {
-                        page.toast("Fetch complete");
-                        page.refresh_all();
-                    }
-                    Err(GitError::Cancelled) => {}
-                    Err(e) => {
-                        page.error(&e);
-                        page.refresh_all();
-                    }
+            |page, result| match result {
+                Ok(()) => {
+                    page.toast("Fetch complete");
+                    page.refresh_all();
+                }
+                Err(GitError::Cancelled) => {}
+                Err(e) => {
+                    page.error(&e);
+                    page.refresh_all();
                 }
             },
         );
@@ -2727,7 +3038,13 @@ impl RepoPage {
             page.run_streaming(
                 "Pulling…",
                 move |cancel, progress| {
-                    repo.pull(remote.as_deref(), rebase_value, ff_value, Some(cancel), progress)
+                    repo.pull(
+                        remote.as_deref(),
+                        rebase_value,
+                        ff_value,
+                        Some(cancel),
+                        progress,
+                    )
                 },
                 |page, result| match result {
                     Ok(MergeOutcome::Conflicts(_)) => {
@@ -2762,11 +3079,18 @@ impl RepoPage {
         self.push_dialog_inner(None, remote);
     }
 
-    fn push_dialog_inner(self: &Rc<Self>, branch: Option<String>, remote_preselect: Option<String>) {
+    fn push_dialog_inner(
+        self: &Rc<Self>,
+        branch: Option<String>,
+        remote_preselect: Option<String>,
+    ) {
         let Some(window) = self.window() else { return };
         let (remotes, status) = {
             let state = self.state.borrow();
-            (state.snapshot.remotes.clone(), state.snapshot.status.clone())
+            (
+                state.snapshot.remotes.clone(),
+                state.snapshot.status.clone(),
+            )
         };
         if remotes.is_empty() {
             let weak = Rc::downgrade(self);
@@ -2867,7 +3191,8 @@ impl RepoPage {
             if force != crate::git::ForceMode::None {
                 let Some(window) = page.window() else { return };
                 let explanation = if force == crate::git::ForceMode::Force {
-                    "This may overwrite commits that others have pushed. This cannot be undone.".to_string()
+                    "This may overwrite commits that others have pushed. This cannot be undone."
+                        .to_string()
                 } else {
                     "Force-with-lease refuses to overwrite commits you have not seen.".to_string()
                 };
@@ -2963,9 +3288,7 @@ impl RepoPage {
             let remote_for_msg = remote.clone();
             page.run_streaming(
                 &format!("Pushing tag to {remote}…"),
-                move |cancel, progress| {
-                    repo.push_tag(&remote, &tag, Some(cancel), progress)
-                },
+                move |cancel, progress| repo.push_tag(&remote, &tag, Some(cancel), progress),
                 move |page, result| {
                     match result {
                         Ok(()) => page.toast(&format!("Tag pushed to {remote_for_msg}")),
@@ -3161,9 +3484,7 @@ impl RepoPage {
             Some("Create a lightweight or annotated tag."),
         );
         let box_ = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        let name_entry = gtk::Entry::builder()
-            .placeholder_text("v1.0.0")
-            .build();
+        let name_entry = gtk::Entry::builder().placeholder_text("v1.0.0").build();
         let message_view = gtk::TextView::builder()
             .height_request(80)
             .wrap_mode(gtk::WrapMode::WordChar)
@@ -3212,7 +3533,11 @@ impl RepoPage {
                 .to_string();
             let annotated_value = annotated.is_active();
             let target = target_entry.text().trim().to_string();
-            let target = if target.is_empty() { None } else { Some(target) };
+            let target = if target.is_empty() {
+                None
+            } else {
+                Some(target)
+            };
             let force_value = force.is_active();
             let repo = page.repo.clone();
             let message_opt = if annotated_value && !message.trim().is_empty() {
@@ -3281,12 +3606,7 @@ impl RepoPage {
             let repo = page.repo.clone();
             page.run(
                 move || {
-                    repo.stash_save(
-                        message.as_deref(),
-                        untracked_value,
-                        keep_index_value,
-                        None,
-                    )
+                    repo.stash_save(message.as_deref(), untracked_value, keep_index_value, None)
                 },
                 |page, _| {
                     page.toast("Changes stashed");
@@ -3324,9 +3644,9 @@ impl RepoPage {
     fn remote_dialog(self: &Rc<Self>, existing: Option<String>) {
         let Some(window) = self.window() else { return };
         let remotes = self.state.borrow().snapshot.remotes.clone();
-        let current = existing.as_ref().and_then(|name| {
-            remotes.iter().find(|r| &r.name == name).cloned()
-        });
+        let current = existing
+            .as_ref()
+            .and_then(|name| remotes.iter().find(|r| &r.name == name).cloned());
         let dialog = adw::MessageDialog::new(
             Some(&window),
             Some(if existing.is_some() {
@@ -3515,7 +3835,8 @@ impl RepoPage {
                 match result {
                     Ok((files, diffs)) => {
                         page.view_stack.set_visible_child_name("history");
-                        page.history.show_compare(&rev, "working tree", files, diffs);
+                        page.history
+                            .show_compare(&rev, "working tree", files, diffs);
                     }
                     Err(e) => page.error(&e),
                 }
@@ -3561,7 +3882,8 @@ impl RepoPage {
     /// Apply changed application settings.
     pub fn apply_settings(self: &Rc<Self>, settings: crate::core::Settings) {
         self.changes.set_show_ignored(settings.show_ignored_files);
-        self.changes.set_diff_mode(diff_mode_from(settings.diff_view_mode));
+        self.changes
+            .set_diff_mode(diff_mode_from(settings.diff_view_mode));
         self.changes
             .commit_panel()
             .set_signoff(settings.commit_sign_off);
@@ -3644,14 +3966,12 @@ fn request_name(req: &UiRequest) -> &'static str {
         UiRequest::CheckoutBranch(_) => "checkout",
         UiRequest::MergeBranch(_) => "merge",
         UiRequest::RebaseOnto(_) => "rebase",
+        UiRequest::IntegrateBranches { .. } => "branch-drop",
         _ => "other",
     }
 }
 
-fn repo_menu_popover(
-    request: Rc<RefCell<Option<Sender>>>,
-    repo_path: PathBuf,
-) -> gtk::Popover {
+fn repo_menu_popover(request: Rc<RefCell<Option<Sender>>>, repo_path: PathBuf) -> gtk::Popover {
     let popover = gtk::Popover::new();
     let box_ = gtk::Box::new(gtk::Orientation::Vertical, 2);
     box_.set_margin_start(6);
@@ -3680,10 +4000,7 @@ fn repo_menu_popover(
                 let action = action.to_string();
                 let button_for_click = button.clone();
                 button.connect_clicked(move |_| {
-                    if let Some(window) = button_for_click
-                        .root()
-                        .and_downcast::<gtk::Window>()
-                    {
+                    if let Some(window) = button_for_click.root().and_downcast::<gtk::Window>() {
                         let _ = window.activate_action(&format!("win.{action}"), None);
                     }
                     pop.popdown();
@@ -3694,7 +4011,11 @@ fn repo_menu_popover(
         box_.append(&button);
     };
 
-    add("Repository Settings…", Some(UiRequest::RepoPreferences), None);
+    add(
+        "Repository Settings…",
+        Some(UiRequest::RepoPreferences),
+        None,
+    );
     add(
         "Open Repository Folder",
         Some(UiRequest::OpenContainingFolder),
@@ -3756,10 +4077,7 @@ mod tests {
         );
         assert_eq!(
             push_refspecs("feature/x", "publish/x"),
-            Some((
-                "refs/heads/feature/x".into(),
-                "refs/heads/publish/x".into()
-            ))
+            Some(("refs/heads/feature/x".into(), "refs/heads/publish/x".into()))
         );
         assert_eq!(
             push_refspecs("refs/heads/main", "refs/heads/main"),

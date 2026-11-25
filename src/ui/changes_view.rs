@@ -61,6 +61,7 @@ pub struct ChangesView {
     show_ignored: RefCell<bool>,
     rows: RefCell<Vec<Rc<FileRow>>>,
     rendering: std::cell::Cell<bool>,
+    suppress_selection: std::cell::Cell<bool>,
 }
 
 impl ChangesView {
@@ -194,6 +195,29 @@ impl ChangesView {
             let shared: Rc<RefCell<Option<Sender>>> = Rc::new(RefCell::new(None));
             overflow.set_popover(Some(&overflow_popover(shared.clone())));
 
+            // A plain click must replace the selection instead of toggling the
+            // clicked row. Clear every list before the ListBox handles the
+            // press, then its normal MULTIPLE-mode handler selects the now
+            // unselected row. Ctrl/Shift clicks keep their additive behavior.
+            for list in [
+                &conflicts_list,
+                &staged_list,
+                &unstaged_list,
+                &untracked_list,
+                &ignored_list,
+            ] {
+                let w = weak.clone();
+                let target_list = list.clone();
+                let gesture = gtk::GestureClick::new();
+                gesture.set_button(1);
+                gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
+                gesture.connect_pressed(move |gesture, _, x, y| {
+                    let Some(v) = w.upgrade() else { return };
+                    v.prepare_plain_click(&target_list, gesture, x, y);
+                });
+                list.add_controller(gesture);
+            }
+
             // Selection -> preview the diff
             for list in [
                 &conflicts_list,
@@ -205,7 +229,7 @@ impl ChangesView {
                 let w = weak.clone();
                 list.connect_row_selected(move |list, row| {
                     let Some(v) = w.upgrade() else { return };
-                    if v.rendering.get() {
+                    if v.rendering.get() || v.suppress_selection.get() {
                         return;
                     }
                     match row {
@@ -267,6 +291,7 @@ impl ChangesView {
                 show_ignored: RefCell::new(false),
                 rows: RefCell::new(Vec::new()),
                 rendering: std::cell::Cell::new(false),
+                suppress_selection: std::cell::Cell::new(false),
             }
         });
 
@@ -441,6 +466,48 @@ impl ChangesView {
         self.rows.borrow_mut().push(row);
     }
 
+    fn prepare_plain_click(
+        &self,
+        list: &gtk::ListBox,
+        gesture: &gtk::GestureClick,
+        x: f64,
+        y: f64,
+    ) {
+        let modifiers = gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::SHIFT_MASK;
+        if gesture.current_event_state().intersects(modifiers) {
+            return;
+        }
+        // Buttons inside a row must keep their normal click behavior.
+        if click_is_on_button(list, x, y) {
+            return;
+        }
+        if list.row_at_y(y as i32).is_some() {
+            // Clear first; the ListBox's own multiple-selection handler will
+            // then select the clicked row, leaving exactly one selected file.
+            self.clear_selection();
+        } else {
+            self.clear_selection();
+            self.selected_path.borrow_mut().take();
+            self.diff_view.clear();
+            self.diff_view
+                .show_placeholder("Select a file", "Its diff will appear here.");
+        }
+    }
+
+    fn clear_selection(&self) {
+        let previous = self.suppress_selection.replace(true);
+        for list in [
+            &self.conflicts_list,
+            &self.staged_list,
+            &self.unstaged_list,
+            &self.untracked_list,
+            &self.ignored_list,
+        ] {
+            list.unselect_all();
+        }
+        self.suppress_selection.set(previous);
+    }
+
     fn any_selection(&self) -> bool {
         for list in [
             &self.conflicts_list,
@@ -546,7 +613,9 @@ impl ChangesView {
                 list.observe_children().into_iter().flatten().collect();
             for child in children {
                 if let Ok(row) = child.downcast::<gtk::ListBoxRow>() {
-                    let Some(row_child) = row.child() else { continue };
+                    let Some(row_child) = row.child() else {
+                        continue;
+                    };
                     if let Some(found) = rows.iter().find(|r| r.widget.eq(&row_child)) {
                         if paths.contains(&found.path) {
                             list.select_row(Some(&row));
@@ -575,10 +644,7 @@ impl ChangesView {
                 list.observe_children().into_iter().flatten().collect();
             for child in children {
                 if let Ok(row) = child.downcast::<gtk::ListBoxRow>() {
-                    let is_target = row
-                        .child()
-                        .map(|c| target.widget.eq(&c))
-                        .unwrap_or(false);
+                    let is_target = row.child().map(|c| target.widget.eq(&c)).unwrap_or(false);
                     if is_target {
                         list.select_row(Some(&row));
                         return true;
@@ -596,6 +662,25 @@ impl ChangesView {
     pub fn diff_view_widget(&self) -> &Rc<DiffView> {
         &self.diff_view
     }
+}
+
+fn click_is_on_button(list: &gtk::ListBox, x: f64, y: f64) -> bool {
+    let Some(widget) = list.pick(x, y, gtk::PickFlags::DEFAULT) else {
+        return false;
+    };
+    let mut current = Some(widget);
+    while let Some(widget) = current {
+        if widget.downcast_ref::<gtk::Button>().is_some()
+            || widget.downcast_ref::<gtk::MenuButton>().is_some()
+        {
+            return true;
+        }
+        if widget.downcast_ref::<gtk::ListBox>().is_some() {
+            break;
+        }
+        current = widget.parent();
+    }
+    false
 }
 
 fn build_row(entry: &StatusEntry, kind: RowKind, sender: Sender) -> FileRow {
@@ -673,6 +758,23 @@ fn build_row(entry: &StatusEntry, kind: RowKind, sender: Sender) -> FileRow {
 
     menu.set_popover(Some(&row_popover(entry, kind, sender.clone())));
 
+    // Right click opens the same actions menu as the three-dot button.
+    {
+        let entry = entry.clone();
+        let sender = sender.clone();
+        let widget_weak = widget.downgrade();
+        let gesture = gtk::GestureClick::new();
+        gesture.set_button(3);
+        gesture.connect_pressed(move |_, _, x, y| {
+            let Some(widget) = widget_weak.upgrade() else {
+                return;
+            };
+            let popover = row_popover(&entry, kind, sender.clone());
+            util::show_context_menu(&widget, &popover, x, y);
+        });
+        widget.add_controller(gesture);
+    }
+
     widget.append(&icon);
     widget.append(&label);
     widget.append(&action_button);
@@ -693,58 +795,64 @@ fn build_row(entry: &StatusEntry, kind: RowKind, sender: Sender) -> FileRow {
 fn row_popover(entry: &StatusEntry, kind: RowKind, sender: Sender) -> gtk::Popover {
     let popover = gtk::Popover::new();
     let box_ = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    box_.set_width_request(300);
     box_.set_margin_start(6);
     box_.set_margin_end(6);
     box_.set_margin_top(6);
     box_.set_margin_bottom(6);
 
-    let add_button = |label: &str, icon: &str, req: UiRequest, destructive: bool| {
-        let button = gtk::Button::builder()
-            .label(label)
-            .icon_name(icon)
-            .has_frame(false)
-            .halign(gtk::Align::Fill)
-            .build();
-        if destructive {
-            button.add_css_class("destructive-action");
-        }
-        let sender = sender.clone();
-        button.connect_clicked(move |_| {
-            sender(req.clone());
-        });
-        box_.append(&button);
-    };
+    let add_button =
+        |title: &str, description: &str, icon: &str, req: UiRequest, destructive: bool| {
+            let button = util::menu_item(icon, title, description);
+            if destructive {
+                button.add_css_class("destructive-action");
+            }
+            let sender = sender.clone();
+            let pop = popover.clone();
+            button.connect_clicked(move |_| {
+                pop.popdown();
+                sender(req.clone());
+            });
+            box_.append(&button);
+        };
 
     let path = entry.path.clone();
     add_button(
         "Open File",
+        "Open in the default application",
         "document-open-symbolic",
         UiRequest::OpenFile(path.clone()),
         false,
     );
     add_button(
         "Open Containing Folder",
+        "Show the folder in the file manager",
         "folder-open-symbolic",
         UiRequest::OpenFolder(path.clone()),
         false,
     );
     add_button(
         "Copy Path",
+        "Copy the relative path to the clipboard",
         "edit-copy-symbolic",
         UiRequest::CopyPath(path.display().to_string()),
         false,
     );
 
+    box_.append(&util::separator());
+
     match kind {
         RowKind::Untracked => {
             add_button(
                 "Add to .gitignore",
+                "Ignore this untracked file from now on",
                 "action-unavailable-symbolic",
                 UiRequest::AddIgnore(path.clone()),
                 false,
             );
             add_button(
                 "Delete File…",
+                "Permanently delete this untracked file",
                 "user-trash-symbolic",
                 UiRequest::DeleteUntracked(path.clone()),
                 true,
@@ -753,6 +861,7 @@ fn row_popover(entry: &StatusEntry, kind: RowKind, sender: Sender) -> gtk::Popov
         RowKind::Ignored => {
             add_button(
                 "Stop Ignoring",
+                "Remove this path from .gitignore",
                 "list-add-symbolic",
                 UiRequest::RemoveIgnore(path.clone()),
                 false,
@@ -761,6 +870,7 @@ fn row_popover(entry: &StatusEntry, kind: RowKind, sender: Sender) -> gtk::Popov
         RowKind::Conflict => {
             add_button(
                 "Resolve Conflicts…",
+                "Open the conflict resolution view",
                 "dialog-warning-symbolic",
                 UiRequest::ResolveConflict(path.clone()),
                 false,
@@ -769,8 +879,12 @@ fn row_popover(entry: &StatusEntry, kind: RowKind, sender: Sender) -> gtk::Popov
         _ => {}
     }
     if kind != RowKind::Ignored && !entry.is_conflicted() {
+        if kind != RowKind::Untracked && kind != RowKind::Conflict {
+            box_.append(&util::separator());
+        }
         add_button(
             "Discard Changes…",
+            "Restore the file from the last commit",
             "edit-undo-symbolic",
             UiRequest::DiscardPaths(vec![path.clone()]),
             true,
@@ -801,16 +915,20 @@ fn overflow_popover(request: Rc<RefCell<Option<Sender>>>) -> gtk::Popover {
         let request = request.clone();
         let pop = popover.clone();
         button.connect_clicked(move |_| {
+            pop.popdown();
             if let Some(sender) = request.borrow().as_ref() {
                 sender(req.clone());
             }
-            pop.popdown();
         });
         box_.append(&button);
     };
 
     add("Discard all changes…", UiRequest::DiscardAll, true);
-    add("Delete all untracked files…", UiRequest::CleanUntracked, true);
+    add(
+        "Delete all untracked files…",
+        UiRequest::CleanUntracked,
+        true,
+    );
 
     popover.set_child(Some(&box_));
     popover

@@ -294,9 +294,21 @@ fn remote_popover(remote: &Remote, sender: Sender) -> gtk::Popover {
     add("Fetch", UiRequest::FetchRemote(remote.name.clone()), false);
     add("Pull…", UiRequest::PullFrom(remote.name.clone()), false);
     add("Push…", UiRequest::PushTo(remote.name.clone()), false);
-    add("Push All Tags", UiRequest::PushAllTagsTo(remote.name.clone()), false);
-    add("Copy URL", UiRequest::CopyText(remote.fetch_url.clone()), false);
-    add("Edit Remote…", UiRequest::EditRemote(remote.name.clone()), false);
+    add(
+        "Push All Tags",
+        UiRequest::PushAllTagsTo(remote.name.clone()),
+        false,
+    );
+    add(
+        "Copy URL",
+        UiRequest::CopyText(remote.fetch_url.clone()),
+        false,
+    );
+    add(
+        "Edit Remote…",
+        UiRequest::EditRemote(remote.name.clone()),
+        false,
+    );
     add(
         "Rename Remote…",
         UiRequest::RenameRemote(remote.name.clone()),

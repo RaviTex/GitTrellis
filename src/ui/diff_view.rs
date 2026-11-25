@@ -386,11 +386,7 @@ impl DiffView {
 
     fn apply_selection_tag(&self) {
         let buffer = self.unified_view.buffer();
-        buffer.remove_tag_by_name(
-            "hunk-selected",
-            &buffer.start_iter(),
-            &buffer.end_iter(),
-        );
+        buffer.remove_tag_by_name("hunk-selected", &buffer.start_iter(), &buffer.end_iter());
         if let Some(sel) = self.selected_hunk.get() {
             let ranges = self.hunk_line_ranges.borrow();
             if let Some((start, end)) = ranges.get(sel).copied() {
@@ -491,11 +487,7 @@ impl DiffView {
 
         'outer: for (hunk_idx, hunk) in file.hunks.iter().enumerate() {
             let start_line = line_map.len();
-            insert_tagged(
-                &buffer,
-                &format!("{}\n", hunk.header()),
-                &["diff-hunk"],
-            );
+            insert_tagged(&buffer, &format!("{}\n", hunk.header()), &["diff-hunk"]);
             line_map.push(Some(hunk_idx));
 
             let mut old_no = hunk.old_start;
@@ -529,7 +521,13 @@ impl DiffView {
                     LineKind::Removed => vec!["diff-del", "diff-num-region"],
                     _ => vec!["diff-num-region"],
                 };
-                insert_number_tagged(&buffer, &text, &tag, show_numbers, line.kind == LineKind::NoNewline);
+                insert_number_tagged(
+                    &buffer,
+                    &text,
+                    &tag,
+                    show_numbers,
+                    line.kind == LineKind::NoNewline,
+                );
                 line_map.push(Some(hunk_idx));
             }
             hunk_ranges.push((start_line, line_map.len()));
@@ -558,14 +556,16 @@ impl DiffView {
         right_buffer.create_tag(Some("word"), &[("background-rgba", &colors.word_bg)]);
         left_buffer.create_tag(Some("word"), &[("background-rgba", &colors.word_bg)]);
         for buf in [&left_buffer, &right_buffer] {
-            buf.create_tag(Some("hunk"),
+            buf.create_tag(
+                Some("hunk"),
                 &[
                     ("background-rgba", &colors.hunk_bg),
                     ("foreground-rgba", &colors.hunk_fg),
                     ("weight", &700i32),
                 ],
             );
-            buf.create_tag(Some("num"),
+            buf.create_tag(
+                Some("num"),
                 &[("foreground-rgba", &colors.dim_fg), ("scale", &0.9f64)],
             );
         }
@@ -593,32 +593,16 @@ impl DiffView {
                 match hunk.lines[i].kind {
                     LineKind::Context => {
                         let t = &hunk.lines[i].text;
-                        insert_tagged(
-                            &left_buffer,
-                            &sbs_line(Some(old_no), t, width),
-                            &["num"],
-                        );
-                        insert_tagged(
-                            &right_buffer,
-                            &sbs_line(Some(new_no), t, width),
-                            &["num"],
-                        );
+                        insert_tagged(&left_buffer, &sbs_line(Some(old_no), t, width), &["num"]);
+                        insert_tagged(&right_buffer, &sbs_line(Some(new_no), t, width), &["num"]);
                         old_no += 1;
                         new_no += 1;
                         i += 1;
                         rows += 1;
                     }
                     LineKind::NoNewline => {
-                        insert_tagged(
-                            &left_buffer,
-                            "\\ No newline at end of file\n",
-                            &["num"],
-                        );
-                        insert_tagged(
-                            &right_buffer,
-                            "\\ No newline at end of file\n",
-                            &["num"],
-                        );
+                        insert_tagged(&left_buffer, "\\ No newline at end of file\n", &["num"]);
+                        insert_tagged(&right_buffer, "\\ No newline at end of file\n", &["num"]);
                         i += 1;
                         rows += 1;
                     }
@@ -705,17 +689,22 @@ impl DiffView {
 fn create_common_tags(buffer: &gtk::TextBuffer, colors: &DiffColors) {
     buffer.create_tag(Some("diff-add"), &[("background-rgba", &colors.add_bg)]);
     buffer.create_tag(Some("diff-del"), &[("background-rgba", &colors.del_bg)]);
-    buffer.create_tag(Some("diff-hunk"),
+    buffer.create_tag(
+        Some("diff-hunk"),
         &[
             ("background-rgba", &colors.hunk_bg),
             ("foreground-rgba", &colors.hunk_fg),
             ("weight", &700i32),
         ],
     );
-    buffer.create_tag(Some("diff-num"),
+    buffer.create_tag(
+        Some("diff-num"),
         &[("foreground-rgba", &colors.dim_fg), ("scale", &0.9f64)],
     );
-    buffer.create_tag(Some("hunk-selected"), &[("background-rgba", &colors.word_bg)]);
+    buffer.create_tag(
+        Some("hunk-selected"),
+        &[("background-rgba", &colors.word_bg)],
+    );
 }
 
 fn numbered(show: bool, old: Option<u32>, new: Option<u32>, prefix: char, text: &str) -> String {
@@ -867,15 +856,10 @@ mod tests {
 
     #[test]
     fn actionable_only_for_text_changes() {
-        let diff = parse_diff(
-            b"diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n",
-        )
-        .unwrap();
+        let diff =
+            parse_diff(b"diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n").unwrap();
         assert!(is_actionable(&diff[0]));
-        let binary = parse_diff(
-            b"diff --git a/f b/f\nBinary files a/f and b/f differ\n",
-        )
-        .unwrap();
+        let binary = parse_diff(b"diff --git a/f b/f\nBinary files a/f and b/f differ\n").unwrap();
         assert!(!is_actionable(&binary[0]));
     }
 }

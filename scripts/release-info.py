@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Gate alpha publication on an increase in the pushed Cargo package version."""
+"""Prepare an alpha release for a version bump or matching Git tag."""
 
+import argparse
 import os
 from pathlib import Path
 import re
 import subprocess
-import sys
 import tomllib
 import xml.etree.ElementTree as ET
 
@@ -30,14 +30,20 @@ def release_notes(version):
     return section[1].strip() + "\n"
 
 
-def main(before):
+def main(before=None, tag=None):
     current = package_version(Path("Cargo.toml").read_text(encoding="utf-8"))
-    previous_manifest = subprocess.check_output(
-        ["git", "show", f"{before}:Cargo.toml"], text=True
-    )
-    if version_key(current) <= version_key(package_version(previous_manifest)):
-        print(f"Cargo version did not increase to {current}. Skipping publication.")
-        return
+    if tag is not None:
+        if tag != f"v{current}":
+            raise SystemExit(
+                f"Tag {tag} does not match Cargo version {current} in the tagged commit."
+            )
+    else:
+        previous_manifest = subprocess.check_output(
+            ["git", "show", f"{before}:Cargo.toml"], text=True
+        )
+        if version_key(current) <= version_key(package_version(previous_manifest)):
+            print(f"Cargo version did not increase to {current}. Skipping publication.")
+            return
 
     rpm_version = subprocess.check_output(
         ["rpmspec", "-q", "--srpm", "--qf", "%{VERSION}", "packaging/fedora/gittrellis.spec"],
@@ -60,4 +66,9 @@ def main(before):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    parser = argparse.ArgumentParser(description=__doc__)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--before", metavar="COMMIT")
+    source.add_argument("--tag", metavar="TAG")
+    args = parser.parse_args()
+    main(before=args.before, tag=args.tag)

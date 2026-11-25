@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
     inputs:
       previous_commit:
@@ -22,6 +23,7 @@ defaults:
 jobs:
   test:
     name: Test and package on Fedora 45
+    if: github.event_name != 'push' || !github.event.deleted
     runs-on: ubuntu-latest
     container:
       image: registry.fedoraproject.org/fedora:45
@@ -32,6 +34,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
     outputs:
       version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
     steps:
       - name: Install Fedora build dependencies
         run: |
@@ -52,7 +55,7 @@ jobs:
         run: xvfb-run -a dbus-run-session -- cargo test --locked
 
       - name: Check for a release version
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' || (github.event_name == 'push' && github.ref_type == 'tag')
         id: version
         env:
           BEFORE: ${{ github.event.before || inputs.previous_commit }}
@@ -61,13 +64,19 @@ jobs:
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0=safe.directory
           export GIT_CONFIG_VALUE_0="$GITHUB_WORKSPACE"
+          commit="$(git rev-parse HEAD)"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            python3 scripts/release-info.py --tag "$GITHUB_REF_NAME"
+            exit 0
+          fi
           if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
             if [[ ! "$BEFORE" =~ ^[0-9a-f]{40}$ ]] || ! git merge-base --is-ancestor "$BEFORE" HEAD; then
               echo "Supply the full previous commit SHA from main's history." >&2
               exit 1
             fi
           fi
-          python3 scripts/release-info.py "$BEFORE"
+          python3 scripts/release-info.py --before "$BEFORE"
 
       - name: Build and verify release assets
         if: steps.version.outputs.version != ''
@@ -95,7 +104,7 @@ jobs:
   publish:
     name: Publish GitHub alpha
     needs: test
-    if: github.ref == 'refs/heads/main' && needs.test.outputs.version != ''
+    if: needs.test.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -112,6 +121,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.test.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.test.outputs.commit }}
         run: |
           tag="v$VERSION"
           release="$(gh api --paginate "repos/$GH_REPO/releases" \
@@ -125,17 +135,30 @@ jobs:
           sha256sum --check SHA256SUMS
           remote_tags="$(git ls-remote --tags "$GITHUB_SERVER_URL/$GH_REPO.git" \
             "refs/tags/$tag" "refs/tags/$tag^{}")"
-          tagged_commit="$(awk 'END { print $1 }' <<< "$remote_tags")"
-          if [[ -n "$tagged_commit" && "$tagged_commit" != "$GITHUB_SHA" ]]; then
+          tagged_commit="$(awk -v peeled_ref="refs/tags/$tag^{}" '
+            $2 == peeled_ref { peeled = $1 }
+            NF == 2 { ref = $1 }
+            END { print (peeled ? peeled : ref) }
+          ' <<< "$remote_tags")"
+          if [[ "$GITHUB_REF_TYPE" == tag && -z "$tagged_commit" ]]; then
+            echo "$tag is no longer on GitHub" >&2
+            exit 1
+          fi
+          if [[ -n "$tagged_commit" && "$tagged_commit" != "$RELEASE_COMMIT" ]]; then
             echo "$tag already points to a different commit" >&2
             exit 1
           fi
 
           if [[ -z "$release" ]]; then
-            gh release create "$tag" --draft --prerelease --target "$GITHUB_SHA" \
-              --title "GitTrellis $VERSION alpha" --notes-file notes.md
-          elif ! jq -e --arg sha "$GITHUB_SHA" \
-            '.draft and .prerelease and .target_commitish == $sha' <<< "$release" > /dev/null; then
+            tag_options=()
+            if [[ -n "$tagged_commit" ]]; then
+              tag_options+=(--verify-tag)
+            fi
+            gh release create "$tag" --draft --prerelease --target "$RELEASE_COMMIT" \
+              "${tag_options[@]}" --title "GitTrellis $VERSION alpha" --notes-file notes.md
+          elif ! jq -e --arg sha "$RELEASE_COMMIT" --arg tagged "$tagged_commit" \
+            '.draft and .prerelease and ($tagged == $sha or .target_commitish == $sha)' \
+            <<< "$release" > /dev/null; then
             echo "$tag has a draft belonging to a different release target" >&2
             exit 1
           fi

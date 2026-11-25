@@ -79,11 +79,17 @@ GitHub Actions runs the tests on Fedora 45. To publish an alpha, increase the
 version in `Cargo.toml`, refresh `Cargo.lock`, and match the version in the RPM
 spec and the first AppStream release entry. Set the RPM Release back to
 `1%{?dist}` and add a versioned changelog section for the release notes. A
-successful push to `main` publishes that version with the Fedora x86_64 RPM,
-vendored source tarball and checksums. Re-run the version-bump workflow from
-GitHub Actions if publishing fails. If the fix changes the workflow itself,
-run **Fedora CI and alpha release** manually on `main` and supply the full
-commit SHA from immediately before the version-bump push.
+successful version-bump push to `main` publishes the Fedora x86_64 RPM,
+vendored source tarball, and SHA-256 checksums. You can also publish by pushing
+a `vX.Y.Z` tag on a commit whose package version matches the tag. That commit
+must contain the release workflow and a changelog entry for the version. If
+you push both the version bump and the tag for the same commit, the workflow
+publishes the release once.
+
+Re-run the failed workflow from GitHub Actions if publishing fails. If you
+fix the workflow after a version-bump push, you can run **Fedora CI and alpha
+release** on `main` and supply the full commit SHA from immediately before
+that push.
 
 ## Security
 

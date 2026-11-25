@@ -81,7 +81,9 @@ spec and the first AppStream release entry. Set the RPM Release back to
 `1%{?dist}` and add a versioned changelog section for the release notes. A
 successful push to `main` publishes that version with the Fedora x86_64 RPM,
 vendored source tarball and checksums. Re-run the version-bump workflow from
-GitHub Actions if publishing fails.
+GitHub Actions if publishing fails. If the fix changes the workflow itself,
+run **Fedora CI and alpha release** manually on `main` and supply the full
+commit SHA from immediately before the version-bump push.
 
 ## Security
 

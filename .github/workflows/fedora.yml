@@ -5,6 +5,12 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      previous_commit:
+        description: SHA of main immediately before the version-bump push
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -19,6 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: registry.fedoraproject.org/fedora:45
+      # Reap orphaned children from the process-group cancellation tests.
+      options: --init
     env:
       CARGO_BUILD_JOBS: "2"
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -29,7 +37,7 @@ jobs:
         run: |
           dnf -y install git gcc cargo rust rpm-build redhat-rpm-config \
             pkgconf-pkg-config gtk4-devel libadwaita-devel vte291-gtk4-devel \
-            desktop-file-utils libappstream-glib python3 findutils gzip tar
+            desktop-file-utils libappstream-glib python3 procps-ng findutils gzip tar
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,11 +47,18 @@ jobs:
       - run: cargo test --locked
 
       - name: Check for a release version
-        if: github.event_name == 'push'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         id: version
         env:
-          BEFORE: ${{ github.event.before }}
-        run: python3 scripts/release-info.py "$BEFORE"
+          BEFORE: ${{ github.event.before || inputs.previous_commit }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            if [[ ! "$BEFORE" =~ ^[0-9a-f]{40}$ ]] || ! git merge-base --is-ancestor "$BEFORE" HEAD; then
+              echo "Supply the full previous commit SHA from main's history." >&2
+              exit 1
+            fi
+          fi
+          python3 scripts/release-info.py "$BEFORE"
 
       - name: Build and verify release assets
         if: steps.version.outputs.version != ''
@@ -71,7 +86,7 @@ jobs:
   publish:
     name: Publish GitHub alpha
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.outputs.version != ''
+    if: github.ref == 'refs/heads/main' && needs.test.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write

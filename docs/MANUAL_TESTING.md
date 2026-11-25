@@ -17,7 +17,7 @@ cargo run -- /tmp/gittrellis-demo
 
 - [ ] The repository appears in the sidebar with its name and path.
 - [ ] The header shows the repository name and the current branch (`main`).
-- [ ] The window title is `demo — GitTrellis`.
+- [ ] The window title is `gittrellis-demo — GitTrellis`.
 
 ## 2. Changes view
 
@@ -53,8 +53,8 @@ cargo run -- /tmp/gittrellis-demo
 
 - [ ] Type a commit message; Ctrl+Enter commits.
 - [ ] The message box clears, the file lists empty, and a toast confirms.
-- [ ] Toggle **Amend**: the previous message is loaded and the button enables.
-      Cancel the amend afterwards (uncheck and clear the message).
+- [ ] Toggle **Amend**, enter a revised commit message and submit. Verify that
+      HEAD is replaced and the number of commits stays the same.
 
 ## 5. History
 
@@ -69,15 +69,37 @@ cargo run -- /tmp/gittrellis-demo
       branch.
 - [ ] Search commits by message, author and hash returns filtered results.
 
-## 6. Branches
+## 6. Branch menu and History integration
 
-- [ ] **New Branch** creates and switches.
-- [ ] Double-click another branch checks it out.
-- [ ] Drag one local branch onto another: a dialog offers **Merge into** or
-      **Rebase onto**; both update the graph and switch to Conflicts when
-      needed.
-- [ ] **Merge** and **Rebase** ask for confirmation and update the graph.
-- [ ] Deleting an unmerged branch asks for explicit confirmation.
+- [ ] The standalone Branches tab is gone. Click the branch name or press
+      Ctrl+3 to open the header menu. A saved custom Branches shortcut opens
+      the same menu.
+- [ ] Filter local and remote branches by name. Verify the current branch,
+      upstream, ahead/behind counts, and a missing-upstream indicator.
+- [ ] **New Branch…** offers an optional start point and switch checkbox.
+      Create a branch with and without switching, then check it out from the
+      list. A remote-tracking branch can be checked out as a local branch.
+- [ ] Per-branch menus offer checkout, rename, push, upstream, copy, compare,
+      merge, rebase and delete where applicable. Verify destructive
+      confirmations by cancelling once and checking that the branch still exists.
+- [ ] Drag a local branch badge in History onto another local badge. Verify the
+      highlight and the source and target names. Cancel and check both refs
+      with `git rev-parse` to confirm that their tips are unchanged.
+- [ ] On separate disposable fixtures, confirm a merge and a rebase. Verify
+      the checked-out branch, both ref tips, and the graph afterward. Repeat
+      with conflicting commits and resolve or abort from Conflicts.
+- [ ] Drag between two distinct branches on the same commit, including names
+      with slashes. Try self-drops, remote and tag badges, external text and
+      another repository. Scroll enough to recycle rows before repeating.
+- [ ] Activate a local badge or choose **Integrate Branches…** from History
+      using the keyboard. Select a branch outside the visible graph. While a
+      confirmation is open, change a selected tip in a terminal and check that
+      the operation reports the stale selection. Test a dirty checkout and
+      confirm that the worktree retains its edits.
+- [ ] **Compare Branches…** starts with distinct base and target branches, and
+      distinguishes local and remote refs with the same short name. The result
+      shows the expected file changes and no commit actions. Repeat with
+      **Compare Commits…** by choosing a base and then a target.
 
 ## 7. Conflict resolution
 
@@ -108,8 +130,8 @@ cargo run -- /tmp/gittrellis-demo
       does the same. Opening Git output collapses the terminal and vice versa.
 - [ ] Typing `pwd` in the terminal prints the repository path.
 - [ ] Ctrl+S stages the selected file, Ctrl+Shift+S stages everything,
-      Ctrl+R refreshes, Ctrl+P opens push, Ctrl+F searches, F1 shows the
-      shortcut reference.
+      Ctrl+R refreshes, Ctrl+P pushes or opens push options, Ctrl+F fetches,
+      Ctrl+Shift+F searches, and F1 shows the shortcut reference.
 - [ ] Switching the system between dark and light mode restyles the app.
 - [ ] Opening a second repository adds a sidebar entry; switching between
       repositories preserves each one's state.

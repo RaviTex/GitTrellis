@@ -123,7 +123,7 @@ pub const DEFS: &[ShortcutDef] = &[
     },
     ShortcutDef {
         action: "section-branches",
-        label: "Go to Branches",
+        label: "Open Branch Menu",
         section: "Navigation",
         defaults: &["<Control>3"],
     },

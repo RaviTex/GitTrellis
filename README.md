@@ -29,9 +29,10 @@ exactly where your terminal left them — in Git itself.
   merges, tags, remote refs, HEAD), commit details, changed files, per-file
   diffs, and actions: copy SHA/message, create branch/tag, cherry-pick,
   revert, reset, checkout, compare with working tree.
-- **Branches** — create, checkout, rename, delete (with safety confirmation),
-  merge, rebase, set upstream, push, and compare branches. Drag one local
-  branch onto another to merge or rebase it.
+- **Branches** — use the header branch menu to create, check out, rename,
+  delete, publish, and track branches. In History, drag a local branch badge
+  onto another to merge or rebase, or use **Integrate Branches…** from the
+  History actions menu. Compare branches from the same menu.
 - **Remotes** — add, edit, rename, remove, fetch (with optional prune), pull
   (merge / rebase / fast-forward-only), push (including safe force-with-lease
   and confirmed force), delete remote branches and push/delete tags.
@@ -79,7 +80,9 @@ Default shortcuts (all editable in Settings):
 | `Ctrl+O` / `Ctrl+Shift+O` | Open / clone repository |
 | `Ctrl+W` | Close repository |
 | `Ctrl+R` | Refresh |
-| `Ctrl+1` … `Ctrl+6` | Changes, History, Branches, Tags, Stashes, Remotes |
+| `Ctrl+1` / `Ctrl+2` | Changes / History |
+| `Ctrl+3` | Open the header branch menu |
+| `Ctrl+4` … `Ctrl+6` | Tags, Stashes, Remotes |
 | `Ctrl+S` / `Ctrl+Shift+S` | Stage selected / stage all |
 | `Ctrl+Enter` | Commit |
 | `Ctrl+P` / `Ctrl+Shift+P` | Push / pull (one click) |

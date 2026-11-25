@@ -37,14 +37,19 @@ jobs:
         run: |
           dnf -y install git gcc cargo rust rpm-build redhat-rpm-config \
             pkgconf-pkg-config gtk4-devel libadwaita-devel vte291-gtk4-devel \
-            desktop-file-utils libappstream-glib python3 procps-ng findutils gzip tar
+            desktop-file-utils libappstream-glib python3 procps-ng findutils gzip tar \
+            xorg-x11-server-Xvfb xorg-x11-xauth dbus-daemon
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - run: cargo test --locked
+      - name: Run tests with a GTK display
+        env:
+          GDK_BACKEND: x11
+          GITTRELLIS_REQUIRE_GTK_TESTS: "1"
+        run: xvfb-run -a dbus-run-session -- cargo test --locked
 
       - name: Check for a release version
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

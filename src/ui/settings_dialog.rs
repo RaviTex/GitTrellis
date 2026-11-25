@@ -395,7 +395,11 @@ mod tests {
     #[test]
     fn settings_window_focuses_requested_page() {
         // Needs a display; skip silently on headless machines.
-        if gtk::init().is_err() {
+        if let Err(error) = gtk::init() {
+            assert!(
+                std::env::var_os("GITTRELLIS_REQUIRE_GTK_TESTS").is_none(),
+                "GTK display is required for the settings test: {error}",
+            );
             eprintln!("skipping settings window test: no display");
             return;
         }

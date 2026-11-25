@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 use common::TestRepo;
 use gittrellis::git::{
-    patch, ChangeKind, CommitOptions, ConfigScope, ConflictChoice, ForceMode, Git, LineKind,
-    LogOptions, MergeOutcome, Repository, ResetMode, StreamKind,
+    patch, Branch, BranchIntegration, ChangeKind, CommitOptions, ConfigScope, ConflictChoice,
+    ForceMode, Git, LineKind, LogOptions, MergeOutcome, Repository, ResetMode, StreamKind,
 };
 
 fn paths(names: &[&str]) -> Vec<PathBuf> {
@@ -424,6 +424,203 @@ fn create_branch_from_commit_and_tag() {
     let branches = t.repo.branches().unwrap();
     let from_commit = branches.iter().find(|b| b.name == "from-commit").unwrap();
     assert_eq!(from_commit.tip, first);
+}
+
+fn local_branch(repo: &Repository, name: &str) -> Branch {
+    let full_ref = format!("refs/heads/{name}");
+    repo.branches()
+        .unwrap()
+        .into_iter()
+        .find(|branch| branch.full_ref == full_ref)
+        .unwrap()
+}
+
+#[test]
+fn integrate_merges_into_exact_target_after_external_checkout() {
+    let t = TestRepo::init();
+    t.commit_file("initial.txt", "initial", "Initial commit");
+    let initial = t.repo.rev_parse("HEAD").unwrap();
+    t.repo.create_branch("topic/feature", None, true).unwrap();
+    t.commit_file("feature.txt", "feature", "Feature");
+    t.repo.checkout_branch("main").unwrap();
+    t.repo.create_branch("spare", None, false).unwrap();
+    let source = local_branch(&t.repo, "topic/feature");
+    let target = local_branch(&t.repo, "main");
+    assert!(target.is_head);
+
+    t.repo.checkout_branch("spare").unwrap();
+    let outcome = t
+        .repo
+        .integrate_branches(&source, &target, BranchIntegration::Merge)
+        .unwrap();
+
+    assert!(matches!(outcome, MergeOutcome::FastForward));
+    assert_eq!(t.repo.status().unwrap().head_name.as_deref(), Some("main"));
+    assert_eq!(t.repo.rev_parse("refs/heads/main").unwrap(), source.tip);
+    assert_eq!(t.repo.rev_parse("refs/heads/spare").unwrap(), initial);
+}
+
+#[test]
+fn integrate_rebases_source_onto_target_and_preserves_target() {
+    let t = TestRepo::init();
+    t.commit_file("initial.txt", "initial", "Initial commit");
+    t.repo.create_branch("topics/HEAD", None, true).unwrap();
+    t.commit_file("source.txt", "source", "Source");
+    t.repo.checkout_branch("main").unwrap();
+    t.commit_file("target.txt", "target", "Target");
+    let source = local_branch(&t.repo, "topics/HEAD");
+    let target = local_branch(&t.repo, "main");
+
+    t.repo
+        .integrate_branches(&source, &target, BranchIntegration::Rebase)
+        .unwrap();
+
+    let status = t.repo.status().unwrap();
+    assert_eq!(status.head_name.as_deref(), Some("topics/HEAD"));
+    assert_ne!(status.head_oid.as_deref(), Some(source.tip.as_str()));
+    assert_eq!(t.repo.rev_parse("HEAD^").unwrap(), target.tip);
+    assert_eq!(t.repo.rev_parse("refs/heads/main").unwrap(), target.tip);
+}
+
+#[test]
+fn integrate_allows_different_branches_with_same_tip() {
+    let t = TestRepo::init();
+    t.commit_file("initial.txt", "initial", "Initial commit");
+    t.repo.create_branch("same/tip", None, false).unwrap();
+    let source = local_branch(&t.repo, "same/tip");
+    let target = local_branch(&t.repo, "main");
+    assert_eq!(source.tip, target.tip);
+    assert!(matches!(
+        t.repo
+            .integrate_branches(&source, &target, BranchIntegration::Merge),
+        Ok(MergeOutcome::UpToDate),
+    ));
+    assert!(t
+        .repo
+        .integrate_branches(&target, &target, BranchIntegration::Merge)
+        .is_err());
+}
+
+#[test]
+fn integrate_rejects_stale_tips_without_switching_branches() {
+    let t = TestRepo::init();
+    t.commit_file("initial.txt", "initial", "Initial commit");
+    t.repo.create_branch("topic/feature", None, true).unwrap();
+    let source = local_branch(&t.repo, "topic/feature");
+    let target = local_branch(&t.repo, "main");
+    t.commit_file("after.txt", "after selection", "New history");
+
+    let error = t
+        .repo
+        .integrate_branches(&source, &target, BranchIntegration::Merge)
+        .unwrap_err();
+
+    assert!(error
+        .user_message()
+        .contains("changed since it was selected"));
+    assert_eq!(
+        t.repo.status().unwrap().head_name.as_deref(),
+        Some("topic/feature")
+    );
+    assert_eq!(t.repo.rev_parse("refs/heads/main").unwrap(), target.tip);
+}
+
+#[test]
+fn integrate_preserves_dirty_worktree_when_target_checkout_fails() {
+    let t = TestRepo::init();
+    t.commit_file("initial.txt", "initial", "Initial commit");
+    t.commit_file(
+        "shared.txt",
+        "base
+",
+        "Base",
+    );
+    t.repo.create_branch("source", None, false).unwrap();
+    t.commit_file(
+        "shared.txt",
+        "target
+",
+        "Target",
+    );
+    t.repo.checkout_branch("source").unwrap();
+    t.write(
+        "shared.txt",
+        "uncommitted
+",
+    );
+    let source = local_branch(&t.repo, "source");
+    let target = local_branch(&t.repo, "main");
+
+    assert!(t
+        .repo
+        .integrate_branches(&source, &target, BranchIntegration::Merge)
+        .is_err());
+    assert_eq!(
+        t.repo.status().unwrap().head_name.as_deref(),
+        Some("source")
+    );
+    assert_eq!(
+        t.read("shared.txt"),
+        "uncommitted
+"
+    );
+    assert_eq!(t.repo.rev_parse("refs/heads/main").unwrap(), target.tip);
+}
+
+#[test]
+fn integrate_hands_merge_and_rebase_conflicts_to_existing_operations() {
+    let t = TestRepo::init();
+    t.commit_file("initial.txt", "initial", "Initial commit");
+    t.commit_file(
+        "shared.txt",
+        "base
+",
+        "Base",
+    );
+    t.repo.create_branch("source", None, true).unwrap();
+    t.commit_file(
+        "shared.txt",
+        "source
+",
+        "Source",
+    );
+    t.repo.checkout_branch("main").unwrap();
+    t.commit_file(
+        "shared.txt",
+        "target
+",
+        "Target",
+    );
+    let source = local_branch(&t.repo, "source");
+    let target = local_branch(&t.repo, "main");
+
+    assert!(matches!(
+        t.repo
+            .integrate_branches(&source, &target, BranchIntegration::Merge),
+        Ok(MergeOutcome::Conflicts(_)),
+    ));
+    assert!(matches!(
+        t.repo.operation_state(),
+        gittrellis::git::OperationState::Merge { .. }
+    ));
+    assert!(t
+        .repo
+        .integrate_branches(&source, &target, BranchIntegration::Rebase)
+        .is_err());
+    t.repo.merge_abort().unwrap();
+
+    assert!(matches!(
+        t.repo
+            .integrate_branches(&source, &target, BranchIntegration::Rebase),
+        Ok(MergeOutcome::Conflicts(_)),
+    ));
+    assert!(matches!(
+        t.repo.operation_state(),
+        gittrellis::git::OperationState::Rebase { .. }
+    ));
+    t.repo.rebase_abort().unwrap();
+    assert_eq!(t.repo.rev_parse("HEAD").unwrap(), source.tip);
+    assert_eq!(t.repo.rev_parse("refs/heads/main").unwrap(), target.tip);
 }
 
 #[test]
@@ -1190,14 +1387,19 @@ fn askpass_helper_answers_and_rejects() {
 
 #[test]
 fn askpass_dialog_answers_and_cancels() {
-    // The dialog path needs a display; skip silently on headless machines.
-    if std::env::var("WAYLAND_DISPLAY").is_err() && std::env::var("DISPLAY").is_err() {
+    if std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_none() {
+        assert!(
+            std::env::var_os("GITTRELLIS_REQUIRE_GTK_TESTS").is_none(),
+            "GTK display is required for the askpass dialog test",
+        );
         eprintln!("skipping askpass dialog test: no display");
         return;
     }
+    let state = tempfile::tempdir().unwrap();
     let helper = env!("CARGO_BIN_EXE_gittrellis-askpass");
     let answered = std::process::Command::new(helper)
         .arg("Enter passphrase for key '/tmp/id_ed25519':")
+        .env("XDG_STATE_HOME", state.path())
         .env("GITTRELLIS_ASKPASS_TEST_MODE", "1")
         .env("GITTRELLIS_ASKPASS_AUTOANSWER", "typed-passphrase")
         .output()
@@ -1210,12 +1412,14 @@ fn askpass_dialog_answers_and_cancels() {
 
     let cancelled = std::process::Command::new(helper)
         .arg("Password:")
+        .env("XDG_STATE_HOME", state.path())
         .env("GITTRELLIS_ASKPASS_TEST_MODE", "1")
         .env("GITTRELLIS_ASKPASS_AUTOANSWER", "cancel")
         .output()
         .unwrap();
     assert!(!cancelled.status.success());
     assert!(cancelled.stdout.is_empty());
+    assert!(state.path().join("gittrellis/askpass-cancelled").is_file());
 }
 
 #[test]
@@ -1294,9 +1498,8 @@ fn history_search_by_changed_file_name() {
 
 #[test]
 fn askpass_cancel_marker_is_recognised() {
-    let t = TestRepo::init();
-    let _ = t;
-    // The marker lives in the isolated XDG state directory used by the tests.
+    common::isolate();
+    // The marker lives in this test process's isolated XDG state directory.
     assert!(!gittrellis::ui::askpass::cancelled_recently());
     gittrellis::ui::askpass::mark_cancelled();
     assert!(gittrellis::ui::askpass::cancelled_recently());

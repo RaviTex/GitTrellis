@@ -2,7 +2,7 @@
 
 pub mod app;
 pub mod askpass;
-pub mod branches_view;
+mod branch_menu;
 pub mod changes_view;
 pub mod clone_dialog;
 pub mod commit_panel;
@@ -108,9 +108,13 @@ pub fn install_css() {
         .menu-item-description {
             font-size: 0.85em;
         }
-        .drop-hover {
-            background-color: alpha(@accent_bg_color, 0.22);
-            border-radius: 8px;
+        .ref-badge.branch-ref-action {
+            min-height: 0;
+            min-width: 0;
+        }
+        .ref-badge.branch.drop-hover {
+            background-color: alpha(@accent_bg_color, 0.42);
+            outline: 1px solid @accent_color;
         }
         .terminal-panel {
             background-color: @window_bg_color;

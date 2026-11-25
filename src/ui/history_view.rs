@@ -1,12 +1,13 @@
 //! Commit history: virtualised graph list, commit details and commit actions.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::glib;
+use gtk::{gdk, glib};
 
-use crate::git::{ChangedFile, Commit, FileDiff, RefKind};
+use crate::git::{Branch, ChangedFile, Commit, FileDiff, RefKind};
 
 use super::graph::{self, GraphRow, Segment, DOT_RADIUS, ROW_HEIGHT};
 use super::repo_page::UiRequest;
@@ -17,6 +18,35 @@ pub struct HistoryItemData {
     pub commit: Commit,
     pub row: GraphRow,
     pub max_lane: usize,
+    refs: Vec<HistoryRef>,
+}
+
+type RequestSender = Option<Rc<dyn Fn(UiRequest)>>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum HistoryRef {
+    Local {
+        name: String,
+        full_ref: String,
+        tip: String,
+    },
+    Remote(String),
+    Head,
+    Tag(String),
+}
+
+#[derive(Clone, glib::Boxed)]
+#[boxed_type(name = "GitTrellisHistoryBranchDrag")]
+struct BranchDrag {
+    scope: Rc<()>,
+    full_ref: String,
+    tip: String,
+}
+
+impl BranchDrag {
+    fn can_drop_on(&self, target: &Self) -> bool {
+        Rc::ptr_eq(&self.scope, &target.scope) && self.full_ref != target.full_ref
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +66,8 @@ pub struct HistoryView {
     search_field: gtk::DropDown,
     empty_label: gtk::Label,
     count_label: gtk::Label,
-    request: Rc<RefCell<Option<Rc<dyn Fn(UiRequest)>>>>,
+    request: Rc<RefCell<RequestSender>>,
+    drag_scope: Rc<()>,
     // Details panel
     detail_summary: gtk::Label,
     detail_body: gtk::Label,
@@ -44,6 +75,9 @@ pub struct HistoryView {
     detail_committer: gtk::Label,
     detail_sha: gtk::Label,
     detail_refs: gtk::Box,
+    detail_meta: gtk::Grid,
+    detail_actions: gtk::Box,
+    detail_files_heading: gtk::Label,
     detail_files: gtk::ListBox,
     detail_stack: gtk::Stack,
     diff_view: Rc<super::diff_view::DiffView>,
@@ -78,17 +112,15 @@ impl HistoryView {
             .selected(0)
             .tooltip_text("Search field")
             .build();
-        let compare_button = util::icon_button(
-            "git-compare-symbolic",
-            "Compare two commits: select a Base, then a Target",
-        );
+        let sender_holder: Rc<RefCell<RequestSender>> = Rc::new(RefCell::new(None));
+        let compare_button = history_action_menu(&sender_holder);
         let refresh_button = util::icon_button("view-refresh-symbolic", "Reload history (Ctrl+R)");
         toolbar.append(&search_entry);
         toolbar.append(&search_field);
         toolbar.append(&compare_button);
         toolbar.append(&refresh_button);
 
-        let sender_holder: Rc<RefCell<Option<Rc<dyn Fn(UiRequest)>>>> = Rc::new(RefCell::new(None));
+        let drag_scope = Rc::new(());
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let selection = gtk::SingleSelection::new(Some(store.clone()));
         selection.set_autoselect(false);
@@ -98,6 +130,7 @@ impl HistoryView {
             .factory(&history_factory(
                 Rc::clone(&sender_holder),
                 selection.clone(),
+                Rc::clone(&drag_scope),
             ))
             .show_separators(false)
             .build();
@@ -292,14 +325,6 @@ impl HistoryView {
                     }
                 });
             }
-            {
-                let w = weak.clone();
-                compare_button.connect_clicked(move |_| {
-                    if let Some(v) = w.upgrade() {
-                        v.send(UiRequest::CompareCommits);
-                    }
-                });
-            }
             // Commit selection
             {
                 let w = weak.clone();
@@ -419,12 +444,16 @@ impl HistoryView {
                 empty_label: empty_label.clone(),
                 count_label: count_label.clone(),
                 request: Rc::clone(&sender_holder),
+                drag_scope: Rc::clone(&drag_scope),
                 detail_summary: detail_summary.clone(),
                 detail_body: detail_body.clone(),
                 detail_author: detail_author.clone(),
                 detail_committer: detail_committer.clone(),
                 detail_sha: detail_sha.clone(),
                 detail_refs: detail_refs.clone(),
+                detail_meta: meta_grid.clone(),
+                detail_actions: actions.clone(),
+                detail_files_heading: files_header.clone(),
                 detail_files: detail_files.clone(),
                 detail_stack: detail_stack_final.clone(),
                 diff_view: diff_view.clone(),
@@ -509,37 +538,32 @@ impl HistoryView {
     }
 
     /// Replace the commit list.
-    pub fn render(&self, commits: &[Commit], has_more: bool, max_lane: usize) {
+    pub fn render(&self, commits: &[Commit], branches: &[Branch], has_more: bool, max_lane: usize) {
         self.store.remove_all();
-        let layout = graph::layout_commits(commits);
-        let max = max_lane.max(layout.max_lane);
-        for (commit, row) in commits.iter().zip(layout.rows.iter()) {
-            self.store
-                .append(&glib::BoxedAnyObject::new(HistoryItemData {
-                    commit: commit.clone(),
-                    row: row.clone(),
-                    max_lane: max,
-                }));
-        }
-        *self.has_more.borrow_mut() = has_more;
-        self.load_more.set_visible(has_more);
+        self.append(commits, branches, has_more, max_lane);
         let has_commits = !commits.is_empty();
         self.empty_label
             .set_label(if has_commits { "" } else { "No commits yet" });
-        self.count_label
-            .set_label(&format!("{} commits", commits.len()));
     }
 
     /// Append commits (pagination).
-    pub fn append(&self, commits: &[Commit], has_more: bool, max_lane: usize) {
+    pub fn append(&self, commits: &[Commit], branches: &[Branch], has_more: bool, max_lane: usize) {
+        let mut branches_by_tip: HashMap<&str, Vec<&Branch>> = HashMap::new();
+        for branch in branches {
+            branches_by_tip.entry(&branch.tip).or_default().push(branch);
+        }
         let layout = graph::layout_commits(commits);
         let max = max_lane.max(layout.max_lane);
         for (commit, row) in commits.iter().zip(layout.rows.iter()) {
+            let branch_tips = branches_by_tip
+                .get(commit.id.as_str())
+                .map_or_else(Vec::new, Vec::clone);
             self.store
                 .append(&glib::BoxedAnyObject::new(HistoryItemData {
                     commit: commit.clone(),
                     row: row.clone(),
                     max_lane: max,
+                    refs: history_refs(commit, branch_tips),
                 }));
         }
         *self.has_more.borrow_mut() = has_more;
@@ -569,10 +593,14 @@ impl HistoryView {
     }
 
     /// Show commit details and its diffs.
-    pub fn show_commit(&self, commit: &Commit, files: Vec<ChangedFile>, diffs: Vec<FileDiff>) {
+    pub fn show_commit(
+        &self,
+        commit: &Commit,
+        branches: &[Branch],
+        files: Vec<ChangedFile>,
+        diffs: Vec<FileDiff>,
+    ) {
         *self.current_commit.borrow_mut() = Some(commit.clone());
-        *self.current_files.borrow_mut() = files.clone();
-        *self.current_diffs.borrow_mut() = diffs.clone();
 
         self.detail_summary.set_label(&commit.summary);
         let body = commit
@@ -596,25 +624,26 @@ impl HistoryView {
         ));
         self.detail_sha.set_label(&commit.id);
 
-        while let Some(child) = self.detail_refs.first_child() {
-            self.detail_refs.remove(&child);
-        }
-        for r in &commit.refs {
-            let (class, label) = match r.kind {
-                RefKind::Head => ("head", format!("HEAD → {}", r.name)),
-                RefKind::Branch => ("branch", r.name.clone()),
-                RefKind::RemoteBranch => ("remote", r.name.clone()),
-                RefKind::Tag => ("tag", format!("🏷 {}", r.name)),
-            };
-            if r.kind == RefKind::Head && r.name == "HEAD" {
-                // detached HEAD marker
-            }
-            let badge = gtk::Label::new(Some(&label));
-            badge.add_css_class("ref-badge");
-            badge.add_css_class(class);
-            self.detail_refs.append(&badge);
-        }
-        self.detail_refs.set_visible(!commit.refs.is_empty());
+        let tips = branches
+            .iter()
+            .filter(|branch| branch.tip == commit.id)
+            .collect();
+        let refs = history_refs(commit, tips);
+        fill_ref_badges(
+            &self.detail_refs,
+            &refs,
+            &self.request.borrow().clone(),
+            &self.drag_scope,
+        );
+        self.detail_meta.set_visible(true);
+        self.detail_actions.set_visible(true);
+        self.detail_files_heading.set_label("Changed files");
+        self.show_diff_files(files, diffs);
+    }
+
+    fn show_diff_files(&self, files: Vec<ChangedFile>, diffs: Vec<FileDiff>) {
+        let first = diffs.first().cloned();
+        *self.current_diffs.borrow_mut() = diffs;
 
         while let Some(child) = self.detail_files.first_child() {
             self.detail_files.remove(&child);
@@ -641,9 +670,11 @@ impl HistoryView {
             row.set_margin_bottom(2);
             self.detail_files.append(&row);
         }
+        self.detail_files.set_visible(!files.is_empty());
+        *self.current_files.borrow_mut() = files;
 
         self.diff_view.clear();
-        if let Some(first) = diffs.first() {
+        if let Some(first) = first.as_ref() {
             self.diff_view.show_file(first);
             self.diff_view.set_allow_actions(false);
             self.detail_files
@@ -671,28 +702,23 @@ impl HistoryView {
         files: Vec<ChangedFile>,
         diffs: Vec<FileDiff>,
     ) {
-        let mut commit = Commit {
-            id: target.to_string(),
-            short_id: util::short_oid(target).to_string(),
-            parents: vec![],
-            author_name: String::new(),
-            author_email: String::new(),
-            author_time: 0,
-            committer_name: String::new(),
-            committer_email: String::new(),
-            commit_time: 0,
-            summary: format!(
-                "Comparing {} → {}",
-                util::short_oid(base),
-                util::short_oid(target)
-            ),
-            body: String::new(),
-            refs: vec![],
-        };
-        commit.parents = vec![base.to_string()];
-        self.show_commit(&commit, files, diffs);
-        self.detail_author.set_label("Base");
-        self.detail_committer.set_label(target);
+        self.current_commit.borrow_mut().take();
+        self.detail_summary.set_label(&format!(
+            "Comparing {} → {}",
+            comparison_label(base),
+            comparison_label(target)
+        ));
+        self.detail_body.set_visible(false);
+        clear_children(&self.detail_refs);
+        self.detail_refs.set_visible(false);
+        self.detail_meta.set_visible(false);
+        self.detail_actions.set_visible(false);
+        self.detail_files_heading.set_label(if files.is_empty() {
+            "No differences"
+        } else {
+            "Changed files"
+        });
+        self.show_diff_files(files, diffs);
     }
 
     pub fn show_empty(&self) {
@@ -700,9 +726,260 @@ impl HistoryView {
     }
 }
 
+fn history_action_menu(sender_holder: &Rc<RefCell<RequestSender>>) -> gtk::MenuButton {
+    let button = gtk::MenuButton::builder()
+        .label("Actions")
+        .tooltip_text("History actions")
+        .has_frame(false)
+        .build();
+    let popover = gtk::Popover::new();
+    let items = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    for (title, description, icon, request) in [
+        (
+            "Compare Commits",
+            "Select a base commit, then repeat for the target",
+            "view-dual-symbolic",
+            UiRequest::CompareCommits,
+        ),
+        (
+            "Compare Branches…",
+            "Choose a base and a target branch",
+            "view-dual-symbolic",
+            UiRequest::CompareBranches,
+        ),
+        (
+            "Integrate Branches…",
+            "Choose two local branches to merge or rebase",
+            "go-jump-symbolic",
+            UiRequest::PickBranchIntegration { source: None },
+        ),
+    ] {
+        let item = util::menu_item(icon, title, description);
+        let popover_weak = popover.downgrade();
+        let holder = Rc::clone(sender_holder);
+        item.connect_clicked(move |_| {
+            if let Some(popover) = popover_weak.upgrade() {
+                popover.popdown();
+            }
+            let sender = holder.borrow().clone();
+            if let Some(sender) = sender {
+                sender(request.clone());
+            }
+        });
+        items.append(&item);
+    }
+    popover.set_child(Some(&items));
+    button.set_popover(Some(&popover));
+    button
+}
+
+fn history_refs(commit: &Commit, mut tips: Vec<&Branch>) -> Vec<HistoryRef> {
+    // Branch snapshots preserve full refs and distinguish local names with slashes.
+    tips.sort_by(|a, b| {
+        a.is_remote
+            .cmp(&b.is_remote)
+            .then_with(|| b.is_head.cmp(&a.is_head))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    let mut refs: Vec<_> = tips
+        .into_iter()
+        .filter(|branch| !branch.is_remote_head())
+        .map(|branch| {
+            if branch.is_remote {
+                HistoryRef::Remote(branch.name.clone())
+            } else {
+                HistoryRef::Local {
+                    name: branch.name.clone(),
+                    full_ref: branch.full_ref.clone(),
+                    tip: branch.tip.clone(),
+                }
+            }
+        })
+        .collect();
+    refs.extend(commit.refs.iter().filter_map(|ref_| match ref_.kind {
+        RefKind::Head => Some(HistoryRef::Head),
+        RefKind::Tag => Some(HistoryRef::Tag(ref_.name.clone())),
+        RefKind::Branch | RefKind::RemoteBranch => None,
+    }));
+    refs
+}
+
+fn clear_children(container: &gtk::Box) {
+    while let Some(child) = container.first_child() {
+        container.remove(&child);
+    }
+}
+
+fn fill_ref_badges(
+    container: &gtk::Box,
+    refs: &[HistoryRef],
+    sender: &RequestSender,
+    scope: &Rc<()>,
+) {
+    const INLINE_REFS: usize = 3;
+    clear_children(container);
+    container.set_visible(!refs.is_empty());
+    for ref_ in refs.iter().take(INLINE_REFS) {
+        let badge = ref_badge(ref_, sender, scope, None);
+        container.append(&badge);
+    }
+    let overflow = &refs[refs.len().min(INLINE_REFS)..];
+    if overflow.is_empty() {
+        return;
+    }
+    let button = gtk::MenuButton::builder()
+        .label(format!("+{}", overflow.len()))
+        .tooltip_text("Show more refs on this commit")
+        .build();
+    button.add_css_class("flat");
+    button.add_css_class("ref-badge");
+    button.add_css_class("branch-ref-action");
+    let popover = gtk::Popover::new();
+    let list = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    for ref_ in overflow {
+        let badge = ref_badge(ref_, sender, scope, Some(&popover));
+        list.append(&badge);
+    }
+    let scroll = gtk::ScrolledWindow::builder()
+        .child(&list)
+        .min_content_width(170)
+        .max_content_height(260)
+        .propagate_natural_height(true)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .build();
+    popover.set_child(Some(&scroll));
+    button.set_popover(Some(&popover));
+    container.append(&button);
+}
+
+fn ref_badge(
+    ref_: &HistoryRef,
+    sender: &RequestSender,
+    scope: &Rc<()>,
+    overflow: Option<&gtk::Popover>,
+) -> gtk::Widget {
+    let (class, text) = match ref_ {
+        HistoryRef::Local { name, .. } => ("branch", name.clone()),
+        HistoryRef::Remote(name) => ("remote", name.clone()),
+        HistoryRef::Head => ("head", "HEAD".into()),
+        HistoryRef::Tag(name) => ("tag", format!("🏷 {name}")),
+    };
+    let label = gtk::Label::builder()
+        .label(&text)
+        .ellipsize(gtk::pango::EllipsizeMode::Middle)
+        .max_width_chars(17)
+        .build();
+    let widget: gtk::Widget = match (ref_, sender) {
+        (HistoryRef::Local { full_ref, tip, .. }, Some(sender)) => {
+            let description = if overflow.is_some() {
+                "Activate to choose a target"
+            } else {
+                "Drag onto another local branch, or activate to choose a target"
+            };
+            let badge = gtk::Button::builder()
+                .child(&label)
+                .has_frame(false)
+                .tooltip_text(format!("{text}\n{description}"))
+                .build();
+            badge.add_css_class("branch-ref-action");
+            let source = full_ref.clone();
+            let pick = Rc::clone(sender);
+            let popover = overflow.map(|popover| popover.downgrade());
+            badge.connect_clicked(move |_| {
+                if let Some(popover) = popover.as_ref().and_then(glib::WeakRef::upgrade) {
+                    popover.popdown();
+                }
+                pick(UiRequest::PickBranchIntegration {
+                    source: Some(source.clone()),
+                });
+            });
+            if overflow.is_none() {
+                enable_branch_drag(
+                    &badge,
+                    BranchDrag {
+                        scope: Rc::clone(scope),
+                        full_ref: full_ref.clone(),
+                        tip: tip.clone(),
+                    },
+                    Rc::clone(sender),
+                );
+            }
+            badge.upcast()
+        }
+        _ => {
+            label.set_tooltip_text(Some(&text));
+            label.upcast()
+        }
+    };
+    widget.add_css_class("ref-badge");
+    widget.add_css_class(class);
+    widget
+}
+
+fn enable_branch_drag(badge: &gtk::Button, branch: BranchDrag, sender: Rc<dyn Fn(UiRequest)>) {
+    let drag = gtk::DragSource::new();
+    drag.set_actions(gdk::DragAction::COPY);
+    drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+    drag.set_content(Some(&gdk::ContentProvider::for_value(&branch.to_value())));
+    badge.add_controller(drag);
+
+    let target = gtk::DropTarget::new(BranchDrag::static_type(), gdk::DragAction::COPY);
+    let target_branch = branch.clone();
+    target.connect_accept(move |_, drop| {
+        // A local GdkDrag exposes its typed content synchronously before enter.
+        // External drags never provide a GdkDrag here.
+        drop.drag()
+            .and_then(|drag| drag.content().value(BranchDrag::static_type()).ok())
+            .and_then(|value| value.get::<BranchDrag>().ok())
+            .is_some_and(|source| source.can_drop_on(&target_branch))
+    });
+    let weak = badge.downgrade();
+    target.connect_enter(move |_, _, _| {
+        if let Some(badge) = weak.upgrade() {
+            badge.add_css_class("drop-hover");
+        }
+        gdk::DragAction::COPY
+    });
+    let weak = badge.downgrade();
+    target.connect_leave(move |_| {
+        if let Some(badge) = weak.upgrade() {
+            badge.remove_css_class("drop-hover");
+        }
+    });
+    let weak = badge.downgrade();
+    target.connect_drop(move |_, value, _, _| {
+        if let Some(badge) = weak.upgrade() {
+            badge.remove_css_class("drop-hover");
+        }
+        let Ok(source) = value.get::<BranchDrag>() else {
+            return false;
+        };
+        if !source.can_drop_on(&branch) {
+            return false;
+        }
+        sender(UiRequest::IntegrateBranches {
+            source: source.full_ref,
+            source_tip: source.tip,
+            target: branch.full_ref.clone(),
+            target_tip: branch.tip.clone(),
+        });
+        true
+    });
+    badge.add_controller(target);
+}
+
+fn comparison_label(side: &str) -> &str {
+    if matches!(side.len(), 40 | 64) && side.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        util::short_oid(side)
+    } else {
+        side
+    }
+}
+
 fn history_factory(
-    sender_holder: Rc<RefCell<Option<Rc<dyn Fn(UiRequest)>>>>,
+    sender_holder: Rc<RefCell<RequestSender>>,
     selection: gtk::SingleSelection,
+    drag_scope: Rc<()>,
 ) -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     let setup_holder = Rc::clone(&sender_holder);
@@ -717,7 +994,7 @@ fn history_factory(
         row.set_margin_bottom(2);
         let graph = gtk::DrawingArea::new();
         graph.set_content_height(ROW_HEIGHT as i32);
-        graph.set_valign(gtk::Align::Center);
+        graph.set_valign(gtk::Align::Fill);
         graph.add_css_class("commit-graph");
         let text_box = gtk::Box::new(gtk::Orientation::Vertical, 1);
         text_box.set_valign(gtk::Align::Center);
@@ -739,9 +1016,9 @@ fn history_factory(
         meta.append(&sha);
         meta.append(&author);
         meta.append(&time);
-        meta.append(&refs);
         text_box.append(&summary);
         text_box.append(&meta);
+        text_box.append(&refs);
         row.append(&graph);
         row.append(&text_box);
         let menu = gtk::MenuButton::builder()
@@ -806,13 +1083,14 @@ fn history_factory(
         let commit = data.commit.clone();
         let graph_row = data.row.clone();
         let max_lane = data.max_lane;
+        let ref_labels = data.refs.clone();
         drop(data);
+        let sender = holder_for_bind.borrow().clone();
 
         // Commit actions menu
         if let Some(menu) = row.last_child().and_downcast::<gtk::MenuButton>() {
             menu.set_visible(true);
-            let sender = holder_for_bind.borrow().clone();
-            menu.set_popover(Some(&commit_context_popover(&commit, sender)));
+            menu.set_popover(Some(&commit_context_popover(&commit, sender.clone())));
         }
 
         // Graph drawing
@@ -877,24 +1155,31 @@ fn history_factory(
                 {
                     time.set_label(&format!("· {}", util::relative_time(commit.commit_time)));
                 }
-                if let Some(refs) = m.get(3).and_then(|c| c.clone().downcast::<gtk::Box>().ok()) {
-                    while let Some(c) = refs.first_child() {
-                        refs.remove(&c);
-                    }
-                    for r in commit.refs.iter().take(6) {
-                        let (class, label) = match r.kind {
-                            RefKind::Head => ("head", "HEAD".to_string()),
-                            RefKind::Branch => ("branch", r.name.clone()),
-                            RefKind::RemoteBranch => ("remote", r.name.clone()),
-                            RefKind::Tag => ("tag", format!("🏷 {}", r.name)),
-                        };
-                        let badge = gtk::Label::new(Some(&label));
-                        badge.add_css_class("ref-badge");
-                        badge.add_css_class(class);
-                        refs.append(&badge);
-                    }
-                }
             }
+            if let Some(refs) = tb.get(2).and_then(|c| c.clone().downcast::<gtk::Box>().ok()) {
+                fill_ref_badges(&refs, &ref_labels, &sender, &drag_scope);
+            }
+        }
+    });
+    factory.connect_unbind(move |_, item| {
+        let Some(row) = item
+            .downcast_ref::<gtk::ListItem>()
+            .and_then(|item| item.child())
+            .and_downcast::<gtk::Box>()
+        else {
+            return;
+        };
+        if let Some(refs) = row
+            .first_child()
+            .and_then(|graph| graph.next_sibling())
+            .and_then(|text| text.last_child())
+            .and_downcast::<gtk::Box>()
+        {
+            clear_children(&refs);
+        }
+        if let Some(menu) = row.last_child().and_downcast::<gtk::MenuButton>() {
+            menu.set_popover(gtk::Popover::NONE);
+            menu.set_visible(false);
         }
     });
     factory
@@ -1061,4 +1346,83 @@ fn commit_context_popover(commit: &Commit, sender: Option<Rc<dyn Fn(UiRequest)>>
     );
     popover.set_child(Some(&box_));
     popover
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::parse::{parse_branches, parse_log};
+
+    #[test]
+    fn branch_badges_use_local_ref_identity_and_keep_same_tip_branches() {
+        let log_line = [
+            "tip",
+            "tip",
+            "",
+            "author",
+            "author@example.com",
+            "1",
+            "committer",
+            "committer@example.com",
+            "1",
+            "summary",
+            "HEAD -> main, feature/fix, origin/HEAD, origin/main, tag: v1",
+            "body",
+        ]
+        .join("\u{1f}");
+        let commit = parse_log(log_line.as_bytes()).unwrap().remove(0);
+        let branches = [
+            ["refs/heads/main", "tip", "*", "", "", "", "", "1"],
+            ["refs/heads/feature/fix", "tip", "", "", "", "", "", "1"],
+            ["refs/heads/feature/HEAD", "tip", "", "", "", "", "", "1"],
+            ["refs/remotes/origin/HEAD", "tip", "", "", "", "", "", "1"],
+            ["refs/remotes/origin/main", "tip", "", "", "", "", "", "1"],
+        ]
+        .map(|fields| fields.join("\u{1f}"))
+        .join("\n");
+        let branches = parse_branches(&branches);
+        let refs = history_refs(&commit, branches.iter().collect());
+        let local = |name: &str| HistoryRef::Local {
+            name: name.into(),
+            full_ref: format!("refs/heads/{name}"),
+            tip: "tip".into(),
+        };
+        assert_eq!(
+            refs,
+            [
+                local("main"),
+                local("feature/HEAD"),
+                local("feature/fix"),
+                HistoryRef::Remote("origin/main".into()),
+                HistoryRef::Head,
+                HistoryRef::Tag("v1".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn drag_is_typed_and_scoped_to_distinct_local_refs_in_one_history() {
+        let scope = Rc::new(());
+        let make_drag = |scope: &Rc<()>, name: &str| BranchDrag {
+            scope: Rc::clone(scope),
+            full_ref: format!("refs/heads/{name}"),
+            tip: "same-tip".into(),
+        };
+        let source = make_drag(&scope, "feature/fix");
+        let decoded = source.to_value().get::<BranchDrag>().unwrap();
+        assert!(decoded.can_drop_on(&make_drag(&scope, "main")));
+        assert!(!decoded.can_drop_on(&source));
+        assert!(!decoded.can_drop_on(&make_drag(&Rc::new(()), "main")));
+        assert!("main".to_value().get::<BranchDrag>().is_err());
+    }
+
+    #[test]
+    fn comparison_only_shortens_object_ids() {
+        assert_eq!(
+            comparison_label("12abcdef00000000000000000000000000000000"),
+            "12abcdef"
+        );
+        assert_eq!(comparison_label("origin/long-feature"), "origin/long-feature");
+        assert_eq!(comparison_label("複製されたブランチ"), "複製されたブランチ");
+    }
 }

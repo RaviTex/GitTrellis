@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use super::command::{Cancellation, StreamKind};
 use super::error::{GitError, GitResult};
 use super::repo::{normalize_path, MergeOutcome, Repository};
+use super::types::Branch;
 
 /// How to push when the remote branch has diverged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +59,13 @@ impl ResetMode {
             ResetMode::Keep => "Keep — keep uncommitted changes without staging",
         }
     }
+}
+
+/// The direction of a local branch integration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchIntegration {
+    Merge,
+    Rebase,
 }
 
 /// A summary of a repository used by the UI before opening it.
@@ -332,6 +340,80 @@ impl Repository {
         validate_ref_name(name)?;
         self.command().args(["switch", name]).run()?;
         Ok(())
+    }
+
+    /// Integrate the exact local branch tips selected by the user. Recheck
+    /// the worktree and refs because a terminal or another client may have
+    /// changed them while the confirmation was open.
+    pub fn integrate_branches(
+        &self,
+        source: &Branch,
+        target: &Branch,
+        action: BranchIntegration,
+    ) -> GitResult<MergeOutcome> {
+        if source.full_ref == target.full_ref
+            || !source.full_ref.starts_with("refs/heads/")
+            || !target.full_ref.starts_with("refs/heads/")
+        {
+            return Err(GitError::InvalidState {
+                message: "Choose two different local branches.".into(),
+                recovery: None,
+            });
+        }
+
+        let checked_out = match action {
+            BranchIntegration::Merge => target,
+            BranchIntegration::Rebase => source,
+        };
+        let other = match action {
+            BranchIntegration::Merge => source,
+            BranchIntegration::Rebase => target,
+        };
+        let validate = || {
+            if !self.operation_state().is_none() {
+                return Err(GitError::InvalidState {
+                    message: "A Git operation is already in progress.".into(),
+                    recovery: Some("Finish or abort it before integrating branches.".into()),
+                });
+            }
+
+            let live = self.branches()?;
+            for selected in [source, target] {
+                if !live.iter().any(|branch| {
+                    branch.full_ref == selected.full_ref && branch.tip == selected.tip
+                }) {
+                    return Err(GitError::InvalidState {
+                        message: format!(
+                            "Branch `{}` changed since it was selected.",
+                            selected.name
+                        ),
+                        recovery: Some("Refresh History and choose the branches again.".into()),
+                    });
+                }
+            }
+            Ok(live
+                .iter()
+                .any(|branch| branch.is_head && branch.full_ref == checked_out.full_ref))
+        };
+
+        if !validate()? {
+            let name = checked_out.full_ref.strip_prefix("refs/heads/").unwrap();
+            validate_ref_name(name)?;
+            self.command()
+                .args(["switch", "--no-guess", "--", name])
+                .run()?;
+            if !validate()? {
+                return Err(GitError::InvalidState {
+                    message: "The checked-out branch changed during integration.".into(),
+                    recovery: Some("Refresh History and try again.".into()),
+                });
+            }
+        }
+
+        match action {
+            BranchIntegration::Merge => self.merge(&other.full_ref, false, false, None),
+            BranchIntegration::Rebase => self.rebase(Some(&other.full_ref), None, None),
+        }
     }
 
     /// Create and switch to a branch in one step.
@@ -826,7 +908,7 @@ impl Repository {
             .ok_or_else(|| GitError::InvalidState {
                 message: "The current branch has no upstream configured.".into(),
                 recovery: Some(
-                    "Push the branch and enable \"set upstream\", or set an upstream in the Branches panel."
+                    "Push the branch and enable \"set upstream\", or set an upstream in the header branch menu."
                         .into(),
                 ),
             })?;

@@ -415,7 +415,7 @@ impl MainWindow {
                 vec!["<Control>3"],
                 Rc::new(|w: &Rc<Self>| {
                     if let Some(page) = w.active_page() {
-                        page.show_section("branches");
+                        page.open_branch_menu();
                     }
                 }),
             ),

@@ -339,6 +339,16 @@ pub struct Branch {
     pub remote: Option<String>,
 }
 
+impl Branch {
+    /// The conventional symbolic default ref for a remote.
+    pub(crate) fn is_remote_head(&self) -> bool {
+        self.remote
+            .as_deref()
+            .and_then(|remote| self.name.strip_prefix(remote))
+            == Some("/HEAD")
+    }
+}
+
 /// A tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag {

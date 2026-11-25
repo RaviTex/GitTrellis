@@ -13,8 +13,9 @@ use vte4::prelude::*;
 
 use crate::core::{load_snapshot, RepoSnapshot, Settings, SnapshotOptions};
 use crate::git::{
-    Cancellation, Commit, CommitOptions, ConflictChoice, FileDiff, GitError, GitResult,
-    MergeOutcome, OperationState, Repository, ResetMode, StatusEntry, StreamKind,
+    Branch, BranchIntegration, Cancellation, Commit, CommitOptions, ConflictChoice, FileDiff,
+    GitError, GitResult, MergeOutcome, OperationState, Repository, ResetMode, StatusEntry,
+    StreamKind,
 };
 
 use super::changes_view::ChangesView;
@@ -22,7 +23,7 @@ use super::diff_view::DiffMode;
 use super::history_view::{HistoryView, SearchField};
 use super::tasks::{self, StreamingOp};
 use super::util;
-use super::{branches_view::BranchesView, conflict_view::ConflictView, remotes_view::RemotesView};
+use super::{branch_menu::BranchMenu, conflict_view::ConflictView, remotes_view::RemotesView};
 use super::{stashes_view::StashesView, tags_view::TagsView};
 
 pub type Sender = Rc<dyn Fn(UiRequest)>;
@@ -103,7 +104,12 @@ pub enum UiRequest {
     RebaseOnto(String),
     IntegrateBranches {
         source: String,
+        source_tip: String,
         target: String,
+        target_tip: String,
+    },
+    PickBranchIntegration {
+        source: Option<String>,
     },
     SetUpstream(String),
     CompareWithBranch(String),
@@ -200,6 +206,7 @@ struct RepoState {
     history_search: Option<(String, SearchField)>,
     history_filter_rev: Option<String>,
     active_op: Option<StreamingOp>,
+    integrating_branches: bool,
     output_lines: Vec<String>,
     loading: bool,
     pending_refresh: bool,
@@ -216,13 +223,12 @@ pub struct RepoPage {
     conflicts_page: adw::ViewStackPage,
     changes: Rc<ChangesView>,
     history: Rc<HistoryView>,
-    branches: Rc<BranchesView>,
     tags: Rc<TagsView>,
     stashes: Rc<StashesView>,
     remotes: Rc<RemotesView>,
     conflicts: Rc<ConflictView>,
     header: adw::HeaderBar,
-    branch_button: gtk::MenuButton,
+    branch_menu: BranchMenu,
     branch_label: gtk::Label,
     sync_label: gtk::Label,
     op_banner: gtk::Box,
@@ -239,7 +245,6 @@ pub struct RepoPage {
     terminal_pid: RefCell<Option<glib::Pid>>,
     terminal_spawning: std::cell::Cell<bool>,
     state: RefCell<RepoState>,
-    request: RefCell<Option<Sender>>,
     settings: RefCell<Settings>,
 }
 
@@ -266,6 +271,8 @@ impl RepoPage {
         title_label.add_css_class("heading");
 
         let branch_label = gtk::Label::new(Some("…"));
+        branch_label.set_max_width_chars(24);
+        branch_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         let branch_button = gtk::MenuButton::builder()
             .child(&branch_label)
             .tooltip_text("Branch actions")
@@ -280,7 +287,7 @@ impl RepoPage {
         title_box.append(&sync_label);
         header.set_title_widget(Some(&title_box));
 
-        let fetch_button = util::icon_button("view-refresh-symbolic", "Fetch (Ctrl+Shift+F)");
+        let fetch_button = util::icon_button("view-refresh-symbolic", "Fetch (Ctrl+F)");
         let pull_button =
             util::icon_button("go-down-symbolic", "Pull from upstream (Ctrl+Shift+P)");
         let push_button = util::icon_button("go-up-symbolic", "Push to upstream (Ctrl+P)");
@@ -299,7 +306,6 @@ impl RepoPage {
         view_stack.set_vexpand(true);
         let changes = ChangesView::new();
         let history = HistoryView::new();
-        let branches = BranchesView::new();
         let tags = TagsView::new();
         let stashes = StashesView::new();
         let remotes = RemotesView::new();
@@ -308,16 +314,14 @@ impl RepoPage {
         let page_names = [
             ("changes", "Changes", "document-edit-symbolic"),
             ("history", "History", "document-open-recent-symbolic"),
-            ("branches", "Branches", "git-branch-symbolic"),
             ("tags", "Tags", "tag-symbolic"),
             ("stashes", "Stashes", "view-paged-symbolic"),
             ("remotes", "Remotes", "network-server-symbolic"),
             ("conflicts", "Conflicts", "dialog-warning-symbolic"),
         ];
-        let widgets: [gtk::Widget; 7] = [
+        let widgets: [gtk::Widget; 6] = [
             changes.widget().clone().upcast(),
             history.widget().clone().upcast(),
-            branches.widget().clone().upcast(),
             tags.widget().clone().upcast(),
             stashes.widget().clone().upcast(),
             remotes.widget().clone().upcast(),
@@ -510,7 +514,7 @@ impl RepoPage {
             *menu_request.borrow_mut() = Some(sender.clone());
             changes.connect_request(sender.clone());
             history.connect_request(sender.clone());
-            branches.connect_request(sender.clone());
+            let branch_menu = BranchMenu::new(&branch_button, sender.clone());
             tags.connect_request(sender.clone());
             stashes.connect_request(sender.clone());
             remotes.connect_request(sender.clone());
@@ -623,13 +627,12 @@ impl RepoPage {
                 conflicts_page: conflicts_page.clone(),
                 changes: changes.clone(),
                 history: history.clone(),
-                branches: branches.clone(),
                 tags: tags.clone(),
                 stashes: stashes.clone(),
                 remotes: remotes.clone(),
                 conflicts: conflicts.clone(),
                 header: header.clone(),
-                branch_button: branch_button.clone(),
+                branch_menu,
                 branch_label: branch_label.clone(),
                 sync_label: sync_label.clone(),
                 op_banner: op_banner.clone(),
@@ -649,7 +652,6 @@ impl RepoPage {
                     history_limit: 2000,
                     ..Default::default()
                 }),
-                request: RefCell::new(None),
                 settings: RefCell::new(page_settings),
             };
             let settings = page.settings.borrow().clone();
@@ -665,16 +667,6 @@ impl RepoPage {
             page
         });
 
-        // Store the sender for later use.
-        *page.request.borrow_mut() = Some({
-            let weak = Rc::downgrade(&page);
-            Rc::new(move |req: UiRequest| {
-                if let Some(page) = weak.upgrade() {
-                    page.handle_request(req);
-                }
-            })
-        });
-
         let initial = page.clone();
         glib::idle_add_local_once(move || {
             initial.refresh_all();
@@ -686,7 +678,7 @@ impl RepoPage {
     /// True while a background load or a long-running operation is active.
     pub fn is_busy(&self) -> bool {
         let state = self.state.borrow();
-        state.loading || state.active_op.is_some()
+        state.loading || state.integrating_branches || state.active_op.is_some()
     }
 
     pub fn repository(&self) -> &Repository {
@@ -988,7 +980,7 @@ impl RepoPage {
         self.changes
             .set_show_ignored(self.settings.borrow().show_ignored_files);
         self.changes.render(&snapshot.status);
-        self.branches.render(&snapshot.branches);
+        self.branch_menu.render(&snapshot.branches);
         self.tags.render(&snapshot.tags);
         self.stashes.render(&snapshot.stashes);
         self.remotes.render(&snapshot.remotes);
@@ -1005,7 +997,6 @@ impl RepoPage {
             .set_visible(!conflicted.is_empty() || !snapshot.status.operation.is_none());
 
         self.render_status();
-        self.update_branch_popover(&snapshot);
     }
 
     fn render_status(&self) {
@@ -1039,110 +1030,6 @@ impl RepoPage {
             self.op_label
                 .set_label(&util::operation_label(&status.operation));
         }
-    }
-
-    fn update_branch_popover(&self, snapshot: &RepoSnapshot) {
-        let popover = gtk::Popover::new();
-        let box_ = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        box_.set_margin_start(6);
-        box_.set_margin_end(6);
-        box_.set_margin_top(6);
-        box_.set_margin_bottom(6);
-        let search = gtk::SearchEntry::builder()
-            .placeholder_text("Filter branches…")
-            .build();
-        box_.append(&search);
-
-        let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let list_scroll = gtk::ScrolledWindow::builder()
-            .child(&list)
-            .max_content_height(340)
-            .min_content_width(260)
-            .propagate_natural_height(true)
-            .build();
-
-        let sender = self.request.borrow().clone();
-        let mut locals = snapshot
-            .branches
-            .iter()
-            .filter(|b| !b.is_remote)
-            .collect::<Vec<_>>();
-        locals.sort_by(|a, b| b.is_head.cmp(&a.is_head).then_with(|| a.name.cmp(&b.name)));
-
-        let names: Vec<(String, bool)> =
-            locals.iter().map(|b| (b.name.clone(), b.is_head)).collect();
-        for (name, is_head) in names {
-            let button = gtk::Button::builder()
-                .label(if is_head {
-                    format!("✓ {name}")
-                } else {
-                    name.clone()
-                })
-                .has_frame(false)
-                .halign(gtk::Align::Fill)
-                .build();
-            if let Some(sender) = sender.as_ref() {
-                let sender = sender.clone();
-                let name = name.clone();
-                button.connect_clicked(move |_| {
-                    sender(UiRequest::CheckoutBranch(name.clone()));
-                });
-            }
-            list.append(&button);
-        }
-        if let Some(sender) = sender.as_ref() {
-            let pull_quick = gtk::Button::with_label("Pull");
-            pull_quick.set_has_frame(false);
-            let sender_for_pull = sender.clone();
-            pull_quick.connect_clicked(move |_| {
-                sender_for_pull(UiRequest::QuickPull);
-            });
-            box_.append(&pull_quick);
-            let push_quick = gtk::Button::with_label("Push");
-            push_quick.set_has_frame(false);
-            let sender_for_push = sender.clone();
-            push_quick.connect_clicked(move |_| {
-                sender_for_push(UiRequest::QuickPush);
-            });
-            box_.append(&push_quick);
-            let pull_options = gtk::Button::with_label("Pull with options…");
-            pull_options.set_has_frame(false);
-            let sender_for_options = sender.clone();
-            pull_options.connect_clicked(move |_| {
-                sender_for_options(UiRequest::PullOptions);
-            });
-            box_.append(&pull_options);
-            box_.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-            let new_branch = gtk::Button::with_label("New Branch…");
-            new_branch.set_has_frame(false);
-            let sender_for_new = sender.clone();
-            new_branch.connect_clicked(move |_| {
-                sender_for_new(UiRequest::CreateBranch);
-            });
-            box_.append(&new_branch);
-            let compare = gtk::Button::with_label("Compare Branches…");
-            compare.set_has_frame(false);
-            let sender_for_compare = sender.clone();
-            compare.connect_clicked(move |_| {
-                sender_for_compare(UiRequest::CompareBranches);
-            });
-            box_.append(&compare);
-        }
-        box_.append(&list_scroll);
-        let list_clone = list.clone();
-        search.connect_search_changed(move |entry| {
-            let query = entry.text().to_lowercase();
-            let mut child = list_clone.first_child();
-            while let Some(row) = child {
-                child = row.next_sibling();
-                if let Some(label) = row.downcast_ref::<gtk::Button>() {
-                    let text = label.label().unwrap_or_default().to_lowercase();
-                    row.set_visible(query.is_empty() || text.contains(&query));
-                }
-            }
-        });
-        popover.set_child(Some(&box_));
-        self.branch_button.set_popover(Some(&popover));
     }
 
     // -----------------------------------------------------------------
@@ -1187,7 +1074,8 @@ impl RepoPage {
                     Ok((commits, limit)) => {
                         let has_more = commits.len() >= limit;
                         let max_lane = 0;
-                        page.history.render(&commits, has_more, max_lane);
+                        let branches = page.state.borrow().snapshot.branches.clone();
+                        page.history.render(&commits, &branches, has_more, max_lane);
                         page.state.borrow_mut().history = commits;
                         page.state.borrow_mut().history_has_more = has_more;
                     }
@@ -1227,7 +1115,8 @@ impl RepoPage {
                 match result {
                     Ok(commits) => {
                         let has_more = commits.len() >= limit;
-                        page.history.render(&commits, has_more, 0);
+                        let branches = page.state.borrow().snapshot.branches.clone();
+                        page.history.render(&commits, &branches, has_more, 0);
                         page.state.borrow_mut().history = commits;
                     }
                     Err(e) => page.error(&e),
@@ -1251,7 +1140,8 @@ impl RepoPage {
                 let Some(page) = weak.upgrade() else { return };
                 match result {
                     Ok((commit, files, diffs)) => {
-                        page.history.show_commit(&commit, files, diffs);
+                        let branches = page.state.borrow().snapshot.branches.clone();
+                        page.history.show_commit(&commit, &branches, files, diffs);
                         let _ = oid;
                     }
                     Err(e) => page.error(&e),
@@ -1740,8 +1630,35 @@ impl RepoPage {
             }
             UiRequest::MergeBranch(name) => self.confirm_merge(name),
             UiRequest::RebaseOnto(name) => self.confirm_rebase(name),
-            UiRequest::IntegrateBranches { source, target } => {
-                self.integrate_branches_dialog(source, target)
+            UiRequest::IntegrateBranches {
+                source,
+                source_tip,
+                target,
+                target_tip,
+            } => {
+                let find = |reference: &str, tip: &str| {
+                    self.state
+                        .borrow()
+                        .snapshot
+                        .branches
+                        .iter()
+                        .find(|branch| {
+                            !branch.is_remote && branch.full_ref == reference && branch.tip == tip
+                        })
+                        .cloned()
+                };
+                match (find(&source, &source_tip), find(&target, &target_tip)) {
+                    (Some(source), Some(target)) if source.full_ref != target.full_ref => {
+                        self.integrate_branches_dialog(Some((source, target)), None);
+                    }
+                    _ => {
+                        self.toast("Branch tips changed. Refresh History and choose them again.");
+                        self.refresh_all();
+                    }
+                }
+            }
+            UiRequest::PickBranchIntegration { source } => {
+                self.integrate_branches_dialog(None, source.as_deref());
             }
             UiRequest::SetUpstream(name) => {
                 let repo = self.repo.clone();
@@ -1761,16 +1678,19 @@ impl RepoPage {
                     },
                 );
             }
-            UiRequest::CompareWithBranch(name) => {
+            UiRequest::CompareWithBranch(reference) => {
                 let target = self
                     .state
                     .borrow()
                     .snapshot
-                    .status
-                    .head_name
-                    .clone()
+                    .branches
+                    .iter()
+                    .find(|branch| branch.is_head)
+                    .map(|branch| branch.full_ref.clone())
                     .unwrap_or_else(|| "HEAD".into());
-                self.show_compare(&name, &target);
+                if reference != target {
+                    self.show_compare(&reference, &target);
+                }
             }
             UiRequest::CompareBranches => self.compare_branches_dialog(),
             UiRequest::CompareCommits => self.compare_commits_pick(),
@@ -2252,11 +2172,12 @@ impl RepoPage {
             .clone()
             .unwrap_or_else(|| "HEAD".into());
         let weak = Rc::downgrade(self);
-        let target = name.clone();
+        let label = comparison_ref_label(&name);
+        let target = name;
         super::confirm::confirm(
             &window,
             "Merge branch?",
-            &format!("Merge `{name}` into `{branch}`?"),
+            &format!("Merge `{label}` into `{branch}`?"),
             "Merge",
             false,
             move || {
@@ -2298,12 +2219,13 @@ impl RepoPage {
             .clone()
             .unwrap_or_else(|| "HEAD".into());
         let weak = Rc::downgrade(self);
-        let upstream = name.clone();
+        let label = comparison_ref_label(&name);
+        let upstream = name;
         super::confirm::confirm(
             &window,
             "Rebase branch?",
             &format!(
-                "Reapply the commits of `{branch}` on top of `{name}`?\n\nCommits will be rewritten; conflicts may need resolution."
+                "Reapply the commits of `{branch}` on top of `{label}`?\n\nCommits will be rewritten; conflicts may need resolution."
             ),
             "Rebase",
             false,
@@ -2330,158 +2252,227 @@ impl RepoPage {
         );
     }
 
-    fn integrate_branches_dialog(self: &Rc<Self>, source: String, target: String) {
-        if source == target {
-            return;
-        }
-        let known = {
-            let state = self.state.borrow();
-            let is_local = |name: &str| {
-                state
-                    .snapshot
-                    .branches
-                    .iter()
-                    .any(|branch| !branch.is_remote && branch.name == name)
-            };
-            is_local(&source) && is_local(&target)
-        };
-        if !known {
-            self.toast("Unknown branch");
-            return;
-        }
+    fn integrate_branches_dialog(
+        self: &Rc<Self>,
+        dropped: Option<(Branch, Branch)>,
+        source_ref: Option<&str>,
+    ) {
         let Some(window) = self.window() else { return };
-        let head = self.state.borrow().snapshot.status.head_name.clone();
-        let target_is_head = head.as_deref() == Some(target.as_str());
-        let source_is_head = head.as_deref() == Some(source.as_str());
+        let on_drop = dropped.is_some();
+        let mut branches = match dropped {
+            Some((source, target)) => vec![source, target],
+            None => self
+                .state
+                .borrow()
+                .snapshot
+                .branches
+                .iter()
+                .filter(|branch| !branch.is_remote)
+                .cloned()
+                .collect(),
+        };
+        if branches.len() < 2 {
+            self.toast("At least two local branches are needed to integrate");
+            return;
+        }
+
+        // Drag targets are already chosen. For keyboard access default the
+        // target to the checked-out branch when it differs from the source.
+        let (source_index, target_index) = if on_drop {
+            (0, 1)
+        } else {
+            branches.sort_by(|a, b| a.name.cmp(&b.name));
+            let head = branches
+                .iter()
+                .position(|branch| branch.is_head)
+                .unwrap_or(0);
+            let source = if let Some(reference) = source_ref {
+                let Some(index) = branches
+                    .iter()
+                    .position(|branch| branch.full_ref == reference)
+                else {
+                    self.toast("Branch changed. Refresh History and choose it again.");
+                    self.refresh_all();
+                    return;
+                };
+                index
+            } else if head == 0 {
+                1
+            } else {
+                0
+            };
+            let target = if source == head {
+                usize::from(source == 0)
+            } else {
+                head
+            };
+            (source, target)
+        };
 
         let dialog = adw::MessageDialog::new(
             Some(&window),
             Some("Integrate branches"),
-            Some(&format!(
-                "Choose how to integrate `{source}` with `{target}`."
-            )),
+            Some("Choose how to integrate two local branches."),
         );
-
-        let box_ = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        let group = gtk::CheckButton::new();
-        group.set_visible(false);
-        let merge = gtk::CheckButton::with_label(&format!("Merge {source} into {target}"));
-        merge.set_group(Some(&group));
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let names = branches
+            .iter()
+            .map(|branch| branch.name.clone())
+            .collect::<Vec<_>>();
+        let (selectors, source, target) =
+            branch_selectors(&names, "Source", "Target", source_index, target_index);
+        if !on_drop {
+            content.append(&selectors);
+        }
+        let merge = gtk::CheckButton::with_label("Merge into target");
+        let rebase = gtk::CheckButton::with_label("Rebase onto target");
+        rebase.set_group(Some(&merge));
         merge.set_active(true);
-        let rebase = gtk::CheckButton::with_label(&format!("Rebase {source} onto {target}"));
-        rebase.set_group(Some(&group));
         let explanation = gtk::Label::builder().xalign(0.0).wrap(true).build();
         explanation.add_css_class("dim-label");
+        content.append(&merge);
+        content.append(&rebase);
+        content.append(&explanation);
 
-        let merge_text = if target_is_head {
-            format!("Merges {source} into the checked-out branch {target}.")
-        } else {
-            format!("Checks out {target}, then merges {source} into it.")
-        };
-        let rebase_text = if source_is_head {
-            format!("Reapplies the commits of {source} on top of {target}. History is rewritten.")
-        } else {
-            format!(
-                "Checks out {source}, then reapplies its commits on top of {target}. History is rewritten."
-            )
-        };
-        explanation.set_label(&merge_text);
-        {
-            let explanation = explanation.clone();
-            let merge_text = merge_text.clone();
-            merge.connect_toggled(move |button| {
-                if button.is_active() {
-                    explanation.set_label(&merge_text);
-                }
-            });
-        }
-        {
-            let explanation = explanation.clone();
-            rebase.connect_toggled(move |button| {
-                if button.is_active() {
-                    explanation.set_label(&rebase_text);
-                }
-            });
-        }
-
-        box_.append(&merge);
-        box_.append(&rebase);
-        box_.append(&explanation);
-        dialog.set_extra_child(Some(&box_));
+        dialog.set_extra_child(Some(&content));
         dialog.add_response("cancel", "Cancel");
         dialog.add_response("ok", "Continue");
         dialog.set_response_appearance("ok", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("ok"));
         dialog.set_close_response("cancel");
 
+        let update = {
+            let dialog = dialog.downgrade();
+            let merge = merge.downgrade();
+            let explanation = explanation.downgrade();
+            let names = names.clone();
+            Rc::new(move |source: &gtk::DropDown, target: &gtk::DropDown| {
+                let (Some(dialog), Some(merge), Some(explanation)) =
+                    (dialog.upgrade(), merge.upgrade(), explanation.upgrade())
+                else {
+                    return;
+                };
+                let pair = names
+                    .get(source.selected() as usize)
+                    .zip(names.get(target.selected() as usize));
+                let Some((source, target)) = pair.filter(|(source, target)| source != target)
+                else {
+                    dialog.set_response_enabled("ok", false);
+                    explanation.set_label("Choose two different local branches.");
+                    return;
+                };
+                dialog.set_response_enabled("ok", true);
+                let text = if merge.is_active() {
+                    format!("Switch to {target} and merge {source} into it.")
+                } else {
+                    format!(
+                        "Switch to {source} and rebase it onto {target}. This rewrites commits."
+                    )
+                };
+                explanation.set_label(&text);
+            })
+        };
+        update(&source, &target);
+        let target_for_source = target.downgrade();
+        let update_source = update.clone();
+        source.connect_selected_notify(move |source| {
+            if let Some(target) = target_for_source.upgrade() {
+                update_source(source, &target);
+            }
+        });
+        let source_for_target = source.downgrade();
+        let update_target = update.clone();
+        target.connect_selected_notify(move |target| {
+            if let Some(source) = source_for_target.upgrade() {
+                update_target(&source, target);
+            }
+        });
+        let source_for_mode = source.downgrade();
+        let target_for_mode = target.downgrade();
+        merge.connect_toggled(move |_| {
+            if let (Some(source), Some(target)) =
+                (source_for_mode.upgrade(), target_for_mode.upgrade())
+            {
+                update(&source, &target);
+            }
+        });
+
         let weak = Rc::downgrade(self);
         dialog.connect_response(None, move |_, response| {
-            if response != "ok" {
+            if response != "ok" || source.selected() == target.selected() {
                 return;
             }
             let Some(page) = weak.upgrade() else { return };
-            if merge.is_active() {
-                page.perform_branch_merge(source.clone(), target.clone());
-            } else {
-                page.perform_branch_rebase(source.clone(), target.clone());
+            let pair = branches
+                .get(source.selected() as usize)
+                .zip(branches.get(target.selected() as usize));
+            if let Some((source, target)) = pair {
+                let action = if merge.is_active() {
+                    BranchIntegration::Merge
+                } else {
+                    BranchIntegration::Rebase
+                };
+                page.perform_branch_integration(source.clone(), target.clone(), action);
             }
         });
         dialog.present();
     }
 
-    fn perform_branch_merge(self: &Rc<Self>, source: String, target: String) {
+    fn perform_branch_integration(
+        self: &Rc<Self>,
+        source: Branch,
+        target: Branch,
+        action: BranchIntegration,
+    ) {
+        {
+            let mut state = self.state.borrow_mut();
+            if state.active_op.is_some() || state.integrating_branches {
+                drop(state);
+                self.toast("Another operation is already running");
+                return;
+            }
+            state.integrating_branches = true;
+        }
+
         let repo = self.repo.clone();
-        let head = self.state.borrow().snapshot.status.head_name.clone();
-        let source_for_msg = source.clone();
-        let target_for_msg = target.clone();
-        self.run(
-            move || {
-                if head.as_deref() != Some(target.as_str()) {
-                    repo.checkout_branch(&target)?;
-                }
-                repo.merge(&source, false, false, None)
-            },
+        let source_name = source.name.clone();
+        let target_name = target.name.clone();
+        self.run_with_error(
+            move || repo.integrate_branches(&source, &target, action),
             move |page, outcome| {
+                page.state.borrow_mut().integrating_branches = false;
                 match outcome {
                     MergeOutcome::Conflicts(_) => {
-                        page.toast("Merge stopped with conflicts");
+                        let message = match action {
+                            BranchIntegration::Merge => "Merge stopped with conflicts",
+                            BranchIntegration::Rebase => "Rebase stopped with conflicts",
+                        };
+                        page.toast(message);
+                        page.conflicts_page.set_visible(true);
                         page.view_stack.set_visible_child_name("conflicts");
                     }
                     MergeOutcome::UpToDate => page.toast("Already up to date"),
-                    MergeOutcome::FastForward => page.toast(&format!(
-                        "Fast-forwarded {target_for_msg} to {source_for_msg}"
-                    )),
+                    MergeOutcome::FastForward => {
+                        page.toast(&format!("Fast-forwarded {target_name} to {source_name}"));
+                    }
                     MergeOutcome::Merged => {
-                        page.toast(&format!("Merged {source_for_msg} into {target_for_msg}"))
+                        let message = match action {
+                            BranchIntegration::Merge => {
+                                format!("Merged {source_name} into {target_name}")
+                            }
+                            BranchIntegration::Rebase => {
+                                format!("Rebased {source_name} onto {target_name}")
+                            }
+                        };
+                        page.toast(&message);
                     }
                 }
                 page.refresh_all();
             },
-        );
-    }
-
-    fn perform_branch_rebase(self: &Rc<Self>, source: String, target: String) {
-        let repo = self.repo.clone();
-        let head = self.state.borrow().snapshot.status.head_name.clone();
-        let source_for_msg = source.clone();
-        let target_for_msg = target.clone();
-        self.run(
-            move || {
-                if head.as_deref() != Some(source.as_str()) {
-                    repo.checkout_branch(&source)?;
-                }
-                repo.rebase(Some(&target), None, None)
-            },
-            move |page, outcome| match outcome {
-                MergeOutcome::Conflicts(_) => {
-                    page.toast("Rebase stopped with conflicts");
-                    page.view_stack.set_visible_child_name("conflicts");
-                    page.refresh_all();
-                }
-                _ => {
-                    page.toast(&format!("Rebased {source_for_msg} onto {target_for_msg}"));
-                    page.refresh_all();
-                }
+            |page, error| {
+                page.state.borrow_mut().integrating_branches = false;
+                page.error(&error);
+                page.refresh_all();
             },
         );
     }
@@ -3738,13 +3729,16 @@ impl RepoPage {
 
     fn compare_branches_dialog(self: &Rc<Self>) {
         let Some(window) = self.window() else { return };
-        let branches = self.state.borrow().snapshot.branches.clone();
-        let names: Vec<String> = branches
+        let branches: Vec<_> = self
+            .state
+            .borrow()
+            .snapshot
+            .branches
             .iter()
-            .filter(|b| !b.name.ends_with("/HEAD"))
-            .map(|b| b.name.clone())
+            .filter(|branch| !branch.is_remote_head())
+            .cloned()
             .collect();
-        if names.len() < 2 {
+        if branches.len() < 2 {
             self.toast("At least two branches are needed to compare");
             return;
         }
@@ -3753,56 +3747,57 @@ impl RepoPage {
             Some("Compare branches"),
             Some("Choose a base and a target branch."),
         );
-        let grid = gtk::Grid::builder()
-            .row_spacing(6)
-            .column_spacing(8)
-            .build();
-        let model = gtk::StringList::new(&names.iter().map(|s| s.as_str()).collect::<Vec<_>>());
-        let base_drop = gtk::DropDown::new(Some(model.clone()), gtk::Expression::NONE);
-        let target_drop = gtk::DropDown::new(Some(model), gtk::Expression::NONE);
-        let head_name = self
-            .state
-            .borrow()
-            .snapshot
-            .status
-            .head_name
-            .clone()
-            .unwrap_or_default();
-        if let Some(index) = names.iter().position(|n| n == &head_name) {
-            base_drop.set_selected(index as u32);
-        }
-        grid.attach(&gtk::Label::new(Some("Base")), 0, 0, 1, 1);
-        grid.attach(&base_drop, 1, 0, 1, 1);
-        grid.attach(&gtk::Label::new(Some("Target")), 0, 1, 1, 1);
-        grid.attach(&target_drop, 1, 1, 1, 1);
+        let names = branches
+            .iter()
+            .map(|branch| comparison_ref_label(&branch.full_ref))
+            .collect::<Vec<_>>();
+        let head = branches
+            .iter()
+            .position(|branch| branch.is_head)
+            .unwrap_or(0);
+        let (grid, base, target) =
+            branch_selectors(&names, "Base", "Target", head, usize::from(head == 0));
         dialog.set_extra_child(Some(&grid));
         dialog.add_response("cancel", "Cancel");
         dialog.add_response("ok", "Compare");
         dialog.set_response_appearance("ok", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("ok"));
         dialog.set_close_response("cancel");
+
+        let target_weak = target.downgrade();
+        let dialog_weak = dialog.downgrade();
+        base.connect_selected_notify(move |base| {
+            if let (Some(target), Some(dialog)) = (target_weak.upgrade(), dialog_weak.upgrade()) {
+                dialog.set_response_enabled("ok", base.selected() != target.selected());
+            }
+        });
+        let base_weak = base.downgrade();
+        let dialog_weak = dialog.downgrade();
+        target.connect_selected_notify(move |target| {
+            if let (Some(base), Some(dialog)) = (base_weak.upgrade(), dialog_weak.upgrade()) {
+                dialog.set_response_enabled("ok", base.selected() != target.selected());
+            }
+        });
         let weak = Rc::downgrade(self);
         dialog.connect_response(None, move |_, response| {
-            if response != "ok" {
+            if response != "ok" || base.selected() == target.selected() {
                 return;
             }
             let Some(page) = weak.upgrade() else { return };
-            let base = names
-                .get(base_drop.selected() as usize)
-                .cloned()
-                .unwrap_or_default();
-            let target = names
-                .get(target_drop.selected() as usize)
-                .cloned()
-                .unwrap_or_default();
-            page.show_compare(&base, &target);
+            let pair = branches
+                .get(base.selected() as usize)
+                .zip(branches.get(target.selected() as usize));
+            if let Some((base, target)) = pair {
+                page.show_compare(&base.full_ref, &target.full_ref);
+            }
         });
         dialog.present();
     }
 
     fn compare_commits_pick(self: &Rc<Self>) {
         let selected = self.history.selected_commit();
-        match (self.state.borrow().compare_base.clone(), selected) {
+        let base = self.state.borrow().compare_base.clone();
+        match (base, selected) {
             (None, Some(sha)) => {
                 self.history.prepare_compare(&sha);
                 self.state.borrow_mut().compare_base = Some(sha.clone());
@@ -3862,7 +3857,12 @@ impl RepoPage {
                 match result {
                     Ok((files, diffs)) => {
                         page.view_stack.set_visible_child_name("history");
-                        page.history.show_compare(&base, &target, files, diffs);
+                        page.history.show_compare(
+                            &comparison_ref_label(&base),
+                            &comparison_ref_label(&target),
+                            files,
+                            diffs,
+                        );
                     }
                     Err(e) => page.error(&e),
                 }
@@ -3894,7 +3894,7 @@ impl RepoPage {
         self.refresh_all();
     }
 
-    /// Switch to a named section (changes, history, branches, tags,
+    /// Switch to a named section (changes, history, tags,
     /// stashes, remotes, conflicts).
     pub fn show_section(self: &Rc<Self>, name: &str) {
         if self.view_stack.child_by_name(name).is_some() {
@@ -3915,10 +3915,13 @@ impl RepoPage {
         self.refresh_status();
     }
 
+    pub fn open_branch_menu(&self) {
+        self.branch_menu.open();
+    }
+
     pub fn focus_search(self: &Rc<Self>) {
         match self.view_stack.visible_child_name().as_deref() {
             Some("history") => self.history.focus_search(),
-            Some("branches") => self.branches.focus_filter(),
             Some("tags") => self.tags.focus_filter(),
             _ => {
                 self.view_stack.set_visible_child_name("history");
@@ -3955,6 +3958,44 @@ impl RepoPage {
     pub fn fetch_current(self: &Rc<Self>) {
         self.fetch_dialog();
     }
+}
+
+fn comparison_ref_label(reference: &str) -> String {
+    if let Some(name) = reference.strip_prefix("refs/heads/") {
+        format!("{name} (local)")
+    } else if let Some(name) = reference.strip_prefix("refs/remotes/") {
+        format!("{name} (remote)")
+    } else {
+        reference.to_string()
+    }
+}
+
+fn branch_selectors(
+    names: &[String],
+    first_label: &str,
+    second_label: &str,
+    first_index: usize,
+    second_index: usize,
+) -> (gtk::Grid, gtk::DropDown, gtk::DropDown) {
+    let grid = gtk::Grid::builder()
+        .row_spacing(6)
+        .column_spacing(8)
+        .build();
+    let model = gtk::StringList::new(&names.iter().map(String::as_str).collect::<Vec<_>>());
+    let first = gtk::DropDown::new(Some(model.clone()), gtk::Expression::NONE);
+    let second = gtk::DropDown::new(Some(model), gtk::Expression::NONE);
+    for (row, label, selector, index) in [
+        (0, first_label, &first, first_index),
+        (1, second_label, &second, second_index),
+    ] {
+        let label = gtk::Label::builder().label(label).xalign(0.0).build();
+        selector.set_selected(index as u32);
+        selector.set_enable_search(true);
+        selector.update_relation(&[gtk::accessible::Relation::LabelledBy(&[label.upcast_ref()])]);
+        grid.attach(&label, 0, row, 1, 1);
+        grid.attach(selector, 1, row, 1, 1);
+    }
+    (grid, first, second)
 }
 
 fn request_name(req: &UiRequest) -> &'static str {

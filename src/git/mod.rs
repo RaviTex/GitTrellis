@@ -18,7 +18,7 @@ pub mod types;
 
 pub use command::{Cancellation, Git, StreamKind};
 pub use error::{GitError, GitResult};
-pub use ops::{CommitOptions, ForceMode, ResetMode};
+pub use ops::{BranchIntegration, CommitOptions, ForceMode, ResetMode};
 pub use parse::{parse_conflict_regions, resolve_conflicts};
 pub use repo::{LogOptions, MergeOutcome, Repository};
 pub use types::*;

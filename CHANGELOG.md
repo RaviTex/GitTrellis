@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Move branch management into the header branch menu and branch comparison
+  into History. Drag local branch badges in History to merge or rebase.
+- Run the website from its own repository.
+
+### Fixed
+
+- Compare Commits no longer crashes when selecting a base.
+- Branch integration checks the live checkout and selected branch tips
+  before running Git.
+
 ## [0.3.0] - 2026-11-25 (alpha)
 
 ### Added

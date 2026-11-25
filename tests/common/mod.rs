@@ -21,7 +21,13 @@ pub fn isolate() {
         std::env::set_var("GIT_TERMINAL_PROMPT", "0");
         std::env::set_var("GIT_AUTHOR_DATE", "1704067200 +0000");
         std::env::set_var("GIT_COMMITTER_DATE", "1704067200 +0000");
-        let home = std::env::temp_dir().join("gittrellis-test-home");
+        // A separate home keeps state written by a previous test run out of
+        // this process. The test binary uses the directory until it exits.
+        let home = tempfile::Builder::new()
+            .prefix("gittrellis-test-home-")
+            .tempdir()
+            .expect("test profile")
+            .keep();
         let _ = std::fs::create_dir_all(home.join(".config"));
         let _ = std::fs::create_dir_all(home.join(".state"));
         std::env::set_var("HOME", &home);

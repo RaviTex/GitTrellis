@@ -71,6 +71,9 @@ merge request when the change is visual.
 
 ## Packaging
 
+In Codex, invoke `$gittrellis-release` to prepare, tag, and verify an alpha.
+See the [repository release skill](.agents/skills/gittrellis-release/SKILL.md).
+
 `scripts/make-source-tarball.sh` vendors dependencies; `scripts/build-rpm.sh`
 builds the RPM. If you add data files (desktop entry, icon, metadata), install
 them from the spec and the Flatpak manifest as well.
